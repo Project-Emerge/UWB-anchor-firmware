@@ -2,13 +2,11 @@
 #![no_main]
 #![no_std]
 
-
 use embassy_executor::Spawner;
 use embassy_stm32::qspi::{self, enums::{AddressSize, ChipSelectHighTime, FIFOThresholdLevel, MemorySize, SampleShifting}};
 use embassy_time::Timer;
 // Print panic message to probe console
 use {defmt_rtt as _, panic_probe as _};
-
 
 // use cortex_m_rt::entry;
 // use stm32l4xx_hal::{
