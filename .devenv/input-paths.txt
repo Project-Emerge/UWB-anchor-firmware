@@ -1,7 +1,0 @@
-/home/nicolas/Documents/repos/Project-Emerge/UWB-anchor-firmware/.devenv/flake.json
-/home/nicolas/Documents/repos/Project-Emerge/UWB-anchor-firmware/.devenv.flake.nix
-/home/nicolas/Documents/repos/Project-Emerge/UWB-anchor-firmware/.env
-/home/nicolas/Documents/repos/Project-Emerge/UWB-anchor-firmware/devenv.local.nix
-/home/nicolas/Documents/repos/Project-Emerge/UWB-anchor-firmware/devenv.lock
-/home/nicolas/Documents/repos/Project-Emerge/UWB-anchor-firmware/devenv.nix
-/home/nicolas/Documents/repos/Project-Emerge/UWB-anchor-firmware/devenv.yaml

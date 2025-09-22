@@ -1,1 +1,22 @@
+# Rust
 /target
+
+# devenv
+.devenv/
+
+# Nix
+result
+result-*
+
+# direnv
+.direnv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
