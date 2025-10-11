@@ -2,9 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-
 fn main() {
-    
     // Retrieve the target chip series from the environment variable
     let target = "stm32l4x2.svd";
 
