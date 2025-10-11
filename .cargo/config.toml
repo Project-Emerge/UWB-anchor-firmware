@@ -1,25 +1,22 @@
-[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+# STM32L432KC configuration
+[target.thumbv7em-none-eabihf]
 runner = "probe-rs run --chip STM32L432KBUx"
-
 rustflags = [
-  # LLD (shipped with the Rust toolchain) is used as the default linker
   "-C", "link-arg=--nmagic",
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",
-  # "-C", "link-arg=-Tstlog.x",
-
-  # if you run into problems with LLD switch to the GNU linker by commenting out
-  # this line
-  # "-C", "linker=arm-none-eabi-ld",
-
-  # if you need to link to pre-compiled C libraries provided by a C toolchain
-  # use GCC as the linker by commenting out both lines above and then
-  # uncommenting the three lines below
-  # "-C", "linker=arm-none-eabi-gcc",
-  # "-C", "link-arg=-Wl,-Tlink.x",
-  # "-C", "link-arg=-nostartfiles",
 ]
 
+# STM32F103 configuration
+[target.thumbv7m-none-eabi]
+runner = "probe-rs run --chip STM32F103C8"
+rustflags = [
+  "-C", "link-arg=--nmagic",
+  "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
+]
+
+# Default build target (STM32L432KC)
 [build]
 target = "thumbv7em-none-eabihf"
 
