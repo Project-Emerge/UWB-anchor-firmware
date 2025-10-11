@@ -29,6 +29,7 @@ use embassy_stm32::{
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Input, Pull};
 use embassy_stm32::mode::Async;
+use embedded_hal_async::digital::Wait;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -63,7 +64,7 @@ async fn main(_spawner: Spawner) {
         config.fifo_threshold = FIFOThresholdLevel::_16Bytes;
         config.sample_shifting = SampleShifting::None;
 
-        defmt::info!("STM32L432KC initialized with SPI and QSPI configuration");
+        defmt::info!("STM32L432KC Tag initialized with SPI and QSPI configuration");
 
         loop {
             Timer::after_millis(1000).await;
@@ -101,70 +102,87 @@ async fn main(_spawner: Spawner) {
         dw1000
             .set_address(
                 mac::PanId(0x0d57),             // hardcoded network id
-                mac::ShortAddress(12443u16),    // random device address
+                mac::ShortAddress(12345u16),    // different device address for tag
             )
             .expect("Failed to set address");
 
-        defmt::info!("STM32F103 initialized with SPI and GPIO configuration");
+        defmt::info!("STM32F103 Tag initialized with SPI and GPIO configuration");
 
         let mut buf = [0; 128];
-        let mut frame_id = 0;
 
-        // Blink LED to show activity
+        // Tag behavior: initiate ranging requests
         loop {
-            let mut sending = ranging::Ping::new(&mut dw1000)
-                .expect("Failed to create ranging ping")
-                .send(dw1000)
-                .expect("Receiving ranging ping failed");
-            uwb_irq.wait_for_rising_edge().await;
-            sending.wait_transmit().expect("Waiting for transmit failed");
-            dw1000 = sending.finish_sending().expect("Finishing sending failed");
-            defmt::info!("completed sending");
-
-            defmt::info!("Starting receive. Frame ID: {}", frame_id);
-            frame_id += 1;
+            // Toggle LED to show activity
+            led.toggle();
 
             let mut receiving = dw1000
                 .receive(RxConfig::default())
                 .expect("Failed to receive message");
-
             match with_timeout(Duration::from_millis(500), uwb_irq.wait_for_rising_edge()).await {
                 Ok(()) => {}
                 Err(_) => {
-                    defmt::info!("Timeout waiting for message\n");
+                    defmt::info!("No incoming message, proceeding to send ranging request");
                     dw1000 = receiving.finish_receiving().expect("Failed to finish receiving");
                     continue;
                 }
             }
-            let message = receiving.wait_receive(&mut buf).expect("TODO: panic message");
 
-            dw1000 = receiving
-                .finish_receiving()
-                .expect("Failed to finish receiving");
-
-            let request = ranging::Request::decode::<Spi<Async>, Output>(&message);
-            let request = match request {
-                Ok(Some(request)) => request,
-                Ok(None) | Err(_) => {
-                    defmt::info!("Ignoring message that is not a request\n");
+            let message = match receiving.wait_receive(&mut buf) {
+                Ok(message) => message,
+                Err(_) => {
+                    dw1000 = receiving.finish_receiving().expect("Failed to finish receiving");
                     continue;
                 }
             };
+            dw1000 = receiving.finish_receiving().expect("Failed to finish receiving");
 
-            let mut sending = ranging::Response::new(&mut dw1000, &request)
-                .expect("Failed to create response")
-                .send(dw1000)
-                .expect("Failed to send response");
-            match with_timeout(Duration::from_millis(500), uwb_irq.wait_for_rising_edge()).await {
-                Ok(()) => {}
-                Err(_) => {
-                    defmt::info!("Timeout waiting for transmit\n");
-                    dw1000 = sending.finish_sending().expect("Finishing sending failed");
-                    continue;
+            defmt::info!("msg from base station: received");
+
+            let ping = ranging::Ping::decode::<Spi<Async>, Output>(&message)
+                .expect("Failed to decode ping");
+
+            if let Some(ping) = ping {
+                Timer::after_millis(10).await;
+
+                let mut sending = ranging::Request::new(&mut dw1000, &ping)
+                    .expect("Failed to initiate request")
+                    .send(dw1000)
+                    .expect("Failed to initiate request transmission");
+
+                match with_timeout(Duration::from_millis(100), uwb_irq.wait_for_rising_edge()).await {
+                    Ok(()) => {}
+                    Err(_) => {
+                        defmt::info!("Timeout waiting for transmit completion");
+                        dw1000 = sending.finish_sending().expect("Finishing sending failed");
+                        continue;
+                    }
                 }
+                sending.wait_transmit().expect("Waiting for transmit failed");
+                dw1000 = sending.finish_sending().expect("Finishing sending failed");
+
+                continue;
             }
-            sending.wait_transmit().expect("Waiting for transmit failed");
-            dw1000 = sending.finish_sending().expect("Finishing sending failed");
+
+            let response = ranging::Response::decode::<Spi<Async>, Output>(&message)
+                .expect("Failed to decode response");
+            if let Some(response) = response {
+                Timer::after_millis(10).await;
+
+                let (pan_id, addr) = match response.source {
+                    Some(mac::Address::Short(pan_id, addr)) => (pan_id, addr),
+                    _ => continue,
+                };
+
+                // Ranging response received. Compute distance.
+                let distance_mm = ranging::compute_distance_mm(&response).unwrap();
+
+                Timer::after_millis(10).await;
+
+                defmt::info!("Distance to anchor (PAN ID: {}, Addr: {}): {} mm", pan_id.0, addr.0, distance_mm);
+
+                continue;
+            }
+            defmt::info!("Ignored message that was neither ping nor response\n");
         }
     }
 }
