@@ -18,8 +18,8 @@ rustflags = [
 
 # Default build target (STM32L432KC)
 [build]
-target = "thumbv7em-none-eabihf"
+target = "thumbv7m-none-eabi"
 
 [env]
 DEFMT_LOG = "info"
-CHIPSERIE = "stm32l432"
+#CHIPSERIE = "stm32l432"
