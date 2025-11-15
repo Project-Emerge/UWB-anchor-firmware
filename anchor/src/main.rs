@@ -15,7 +15,7 @@
 use dw1000::{mac, ranging, RxConfig, DW1000};
 use dw1000::ranging::Message;
 use embassy_executor::Spawner;
-use embassy_time::{with_timeout, Duration, Timer, Instant};
+use embassy_time::{with_timeout, Duration, Timer, Instant, Delay};
 // Print panic message to probe console
 use {defmt_rtt as _, panic_probe as _};
 
@@ -39,6 +39,8 @@ use embassy_stm32::{
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::mode::Async;
+use embassy_stm32::usb::Out;
+use embedded_hal_bus::spi::ExclusiveDevice;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -89,6 +91,7 @@ async fn main(_spawner: Spawner) {
         let mut spi_config = spi::Config::default();
         spi_config.frequency = embassy_stm32::time::Hertz(2_000_000); // 2 MHz
 
+        let cs = Output::new(p.PA4, Level::Low, Speed::Low);
         let spi = Spi::new(
             p.SPI1,
             p.PA5, // SCK
@@ -98,14 +101,14 @@ async fn main(_spawner: Spawner) {
             p.DMA1_CH2, // RX DMA
             spi_config,
         );
+        let spi = ExclusiveDevice::new(spi, cs, Delay);
 
         // GPIO configuration for STM32F103 (using built-in LED on PC13)
         let mut led = Output::new(p.PC13, Level::Low, Speed::Low);
 
-        let cs = Output::new(p.PA4, Level::Low, Speed::Low);
         let mut uwb_irq = ExtiInput::new(p.PB0, p.EXTI0, Pull::None);
         let mut uwb_reset = Output::new(p.PB15, Level::Low, Speed::Low);
-        let dw1000 = DW1000::new(spi, cs);
+        let dw1000 = DW1000::new(spi);
 
         // Reset DW1000
         uwb_reset.set_low();
@@ -119,21 +122,25 @@ async fn main(_spawner: Spawner) {
         dw1000.enable_tx_interrupts().unwrap();
 
         // These are the hardcoded calibration values from the dwm1001-examples
-        // repository. Ideally, the calibration values would be determined using
+        // repository[1]. Ideally, the calibration values would be determined using
         // the proper calibration procedure, but hopefully those are good enough for
         // now.
-        dw1000.set_antenna_delay(16384, 16384).unwrap();
+        //
+        // [1] https://github.com/Decawave/dwm1001-examples
+        // Adjusted antenna delays to match tag configuration for consistent ranging
+        // Previous values (16200, 16050) gave ~6m readings for 3m actual distance
+        // Increasing delays to reduce measured distance back towards 3m
+        dw1000.set_antenna_delay(16456, 16456).unwrap();
 
         // Set network address with random device address
-        let address = 1234u16;
         dw1000
             .set_address(
                 mac::PanId(0x0d57),                    // hardcoded network id
-                mac::ShortAddress(address),        // random device address
+                mac::ShortAddress(1234u16),        // random device address
             )
             .expect("Failed to set address");
 
-        defmt::info!("STM32F103 initialized with SPI and GPIO configuration, device address: {}", address);
+        defmt::info!("STM32F103 initialized with SPI and GPIO configuration, device address: {}", 1234u16);
 
         let mut buf = [0; 128];
         let mut frame_id = 0;
@@ -150,7 +157,7 @@ async fn main(_spawner: Spawner) {
             */
 
             // After receiving for a while, it's time to send out a ping
-            if last_ping_time.elapsed() >= Duration::from_millis(100) {
+            if last_ping_time.elapsed() >= Duration::from_millis(500) {
                 defmt::info!("Sending ping {}", ping_id);
                 ping_id += 1;
                 last_ping_time = Instant::now();
@@ -162,7 +169,7 @@ async fn main(_spawner: Spawner) {
 
                 let mut sending = ranging::Ping::new(&mut dw1000)
                     .expect("Failed to initiate ping")
-                    .send(dw1000)
+                    .send::<ExclusiveDevice<Spi<Async>, Output, Delay>, Output>(dw1000)
                     .expect("Failed to initiate ping transmission");
 
                 // Wait for transmission complete interrupt
@@ -222,7 +229,7 @@ async fn main(_spawner: Spawner) {
             led.set_low();
 
             // Try to decode as ranging request
-            let request = ranging::Request::decode::<Spi<Async>, Output>(&message);
+            let request = ranging::Request::decode::<ExclusiveDevice<Spi<Async>, Output, Delay>>(&message);
 
             let request = match request {
                 Ok(Some(request)) => request,
@@ -244,7 +251,7 @@ async fn main(_spawner: Spawner) {
             // Send ranging response
             let mut sending = ranging::Response::new(&mut dw1000, &request)
                 .expect("Failed to initiate response")
-                .send(dw1000)
+                .send::<ExclusiveDevice<Spi<Async>, Output, Delay>, Output>(dw1000)
                 .expect("Failed to initiate response transmission");
 
             // Wait for transmission complete interrupt

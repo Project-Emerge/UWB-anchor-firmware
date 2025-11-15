@@ -364,12 +364,11 @@ dependencies = [
 
 [[package]]
 name = "dw1000"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a36cfea8a76511e4fb8a69f2b27c95c7fc0d8106a610deed75bf16db968321ed"
+version = "0.7.0"
+source = "git+https://github.com/jkelleyrtp/dw1000-rs#698987dbfebb2db16bf20c166bf0d75c16f982c1"
 dependencies = [
  "byte",
- "embedded-hal 0.2.7",
+ "embedded-hal 1.0.0",
  "fixed",
  "ieee802154",
  "micromath",

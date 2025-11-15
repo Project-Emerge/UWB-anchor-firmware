@@ -21,7 +21,8 @@ embassy-time = { version = "0.5.0", features = [ "defmt", "defmt-timestamp-uptim
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
 
-dw1000 = "0.6.0"
+dw1000 = { git = "https://github.com/jkelleyrtp/dw1000-rs" }
+dw1001 = { git = "https://github.com/jkelleyrtp/dw1000-rs" }
 
 [workspace.dependencies.reqwest]
 version = "0.11"
