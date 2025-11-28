@@ -1,28 +1,61 @@
+[package]
+name = "uwb-anchor"
+version = "0.1.0"
+authors = ["Nicolas Farabegoli <nicolas.farabegoli@gmail.com>"]
+edition = "2021"
+
+[dependencies]
+cortex-m = { workspace = true }
+cortex-m-rt = { workspace = true }
+panic-probe = { workspace = true }
+embedded-hal = { workspace = true }
+embedded-hal-async = { workspace = true }
+embedded-hal-bus = { workspace = true }
+
+# Embassy dependencies
+embassy-stm32 = { workspace = true }
+embassy-sync = { workspace = true }
+embassy-executor = { workspace = true }
+embassy-time = { workspace = true }
+heapless = { workspace = true }
+critical-section = { workspace = true }
+
+# Defmt for logging
+defmt = { workspace = true }
+defmt-rtt = { workspace = true }
+
+dw1000 = { workspace = true }
+
+[build-dependencies]
+reqwest = { workspace = true }
+
 [workspace]
-members = ["anchor", "tag"]
+members = ["tag"]
 resolver = "2"
 
 [workspace.dependencies]
-cortex-m = { version = "0.7.6", features = ["critical-section-single-core"] }
+cortex-m = { version = "0.7.6", features = ["inline-asm", "critical-section-single-core"] }
 cortex-m-rt = "0.7.0"
 panic-probe = { version = "1.0.0", features = ["print-defmt"] }
-embedded-hal = "0.2.6"
-embedded-hal-1 = { package = "embedded-hal", version = "1.0" }
+embedded-hal = "1.0.0"
 embedded-hal-async = { version = "1.0" }
-embedded-hal-bus = { version = "0.1", features = ["async"] }
+embedded-hal-bus = { version = "0.3.0", features = ["async"] }
 
 # Embassy dependencies
-embassy-stm32 = { version = "0.4.0", features = [ "defmt", "unstable-pac", "memory-x", "time-driver-any", "exti"] }
+embassy-stm32 = { version = "0.4.0", features = [ "stm32l432kc", "defmt", "unstable-pac", "memory-x", "time-driver-any", "exti", "chrono"] }
 embassy-sync = { version = "0.7.2", features = ["defmt"] }
-embassy-executor = { version = "0.9.0", features = [ "arch-cortex-m", "executor-thread", "defmt" ] }
+embassy-executor = { version = "0.9.0", features = [ "arch-cortex-m", "executor-interrupt", "executor-thread", "defmt" ] }
 embassy-time = { version = "0.5.0", features = [ "defmt", "defmt-timestamp-uptime", "tick-hz-32_768" ] }
+heapless = { version = "0.9.2", default-features = false }
+critical-section = "1.1"
 
 # Defmt for logging
 defmt = "1.0.1"
 defmt-rtt = "1.0.0"
 
 dw1000 = { git = "https://github.com/jkelleyrtp/dw1000-rs" }
-dw1001 = { git = "https://github.com/jkelleyrtp/dw1000-rs" }
+
+anyhow = { version = "1.0", default-features = false }
 
 [workspace.dependencies.reqwest]
 version = "0.11"
