@@ -1,6 +1,5 @@
-use core::convert::Infallible;
 use embassy_stm32::exti::ExtiInput;
-use embedded_hal::digital::{ErrorType, InputPin, OutputPin};
+use embedded_hal::digital::{ErrorType, OutputPin};
 
 #[derive(Debug)]
 pub enum BootstrapError<Err> {
