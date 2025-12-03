@@ -62,7 +62,7 @@ jobs:
           cargo objcopy --release -- -O binary target/thumbv7em-none-eabihf/release/uwb-anchor-firmware.bin
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: uwb-anchor-firmware-${{ github.sha }}
           path: |
