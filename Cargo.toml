@@ -17,6 +17,9 @@ embassy-stm32 = { workspace = true }
 embassy-sync = { workspace = true }
 embassy-executor = { workspace = true }
 embassy-time = { workspace = true }
+embassy-usb = { workspace = true }
+embassy-embedded-hal = { workspace = true }
+embassy-futures = { workspace = true }
 heapless = { workspace = true }
 critical-section = { workspace = true }
 
@@ -46,6 +49,9 @@ embassy-stm32 = { version = "0.4.0", features = [ "stm32l432kc", "defmt", "unsta
 embassy-sync = { version = "0.7.2", features = ["defmt"] }
 embassy-executor = { version = "0.9.0", features = [ "arch-cortex-m", "executor-interrupt", "executor-thread", "defmt" ] }
 embassy-time = { version = "0.5.0", features = [ "defmt", "defmt-timestamp-uptime", "tick-hz-32_768" ] }
+embassy-usb = { version = "0.5.0", features = [ "defmt" ] }
+embassy-embedded-hal = { version = "0.5.0", features = ["defmt"] }
+embassy-futures = { version = "0.1.2", features = ["defmt"] }
 heapless = { version = "0.9.2", default-features = false }
 critical-section = "1.1"
 

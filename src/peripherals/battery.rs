@@ -31,28 +31,27 @@ impl<'a, T: Instance, P: AdcChannel<T>> SingleCellLiIonBatteryMonitor<'a, T, P> 
 
     /// Read raw ADC value with moving average filtering
     async fn read_filtered_adc(&mut self) -> u16 {
-        // // Set sample time for accurate reading
-        // self.adc.set_sample_time(SampleTime::CYCLES12_5);
-        //
-        // // Read raw ADC value
-        // let raw_value: u16 = self.adc.blocking_read(&mut self.channel);
-        //
-        // // Update circular buffer
-        // self.filter_buffer[self.filter_index] = raw_value;
-        // self.filter_index = (self.filter_index + 1) % self.filter_buffer.len();
-        //
-        // if self.samples_collected < self.filter_buffer.len() {
-        //     self.samples_collected += 1;
-        // }
-        //
-        // // Calculate moving average
-        // let sum: u32 = self.filter_buffer[..self.samples_collected]
-        //     .iter()
-        //     .map(|&x| x as u32)
-        //     .sum();
-        //
-        // (sum / self.samples_collected as u32) as u16
-        16
+        // Set sample time for accurate reading
+        self.adc.set_sample_time(SampleTime::CYCLES12_5);
+
+        // Read raw ADC value
+        let raw_value: u16 = self.adc.blocking_read(&mut self.channel);
+
+        // Update circular buffer
+        self.filter_buffer[self.filter_index] = raw_value;
+        self.filter_index = (self.filter_index + 1) % self.filter_buffer.len();
+
+        if self.samples_collected < self.filter_buffer.len() {
+            self.samples_collected += 1;
+        }
+
+        // Calculate moving average
+        let sum: u32 = self.filter_buffer[..self.samples_collected]
+            .iter()
+            .map(|&x| x as u32)
+            .sum();
+
+        (sum / self.samples_collected as u32) as u16
     }
 }
 
