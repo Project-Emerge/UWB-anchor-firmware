@@ -29,16 +29,11 @@ use embassy_stm32::gpio::Pull;
 use embassy_stm32::peripherals::PA3;
 use embassy_stm32::usb::{Driver, Instance};
 use embassy_stm32::{
-    bind_interrupts,
     gpio::{Level, Output, Speed},
-    usb, Config, Peri,
+    Config, Peri,
 };
 use embassy_usb::class::cdc_acm::CdcAcmClass;
 use embassy_usb::driver::EndpointError;
-
-bind_interrupts!(struct Irqs {
-    USB => usb::InterruptHandler<embassy_stm32::peripherals::USB>;
-});
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
