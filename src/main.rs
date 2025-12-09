@@ -16,7 +16,6 @@ mod peripherals;
 
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_futures::join::join;
 use embassy_time::{Duration, Timer};
 // Print panic message to probe console
 use {defmt_rtt as _, panic_probe as _};
@@ -34,9 +33,8 @@ use embassy_stm32::{
     gpio::{Level, Output, Speed},
     usb, Config, Peri,
 };
-use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
+use embassy_usb::class::cdc_acm::CdcAcmClass;
 use embassy_usb::driver::EndpointError;
-use embassy_usb::Builder;
 
 bind_interrupts!(struct Irqs {
     USB => usb::InterruptHandler<embassy_stm32::peripherals::USB>;
