@@ -179,45 +179,80 @@ async fn main(_spawner: Spawner) {
     //
     //     defmt::info!("Ignored message that was neither ping nor response");
     // }
-
 }
 
 pub fn correct_ch_5_prf_16(dist_cm: u64) -> i64 {
     let dist_cm = i64::try_from(dist_cm).unwrap();
-    let correction = if dist_cm <= 25 { 0 }
-    else if dist_cm <= 50 { 2 }
-    else if dist_cm <= 75 { 3 }
-    else if dist_cm <= 100 { 4 }
-    else if dist_cm <= 125 { 5 }
-    else if dist_cm <= 150 { 6 }
-    else if dist_cm <= 175 { 8 }
-    else if dist_cm <= 200 { 9 }
-    else if dist_cm <= 225 { 10 }
-    else if dist_cm <= 275 { 11 }
-    else if dist_cm <= 300 { 12 }
-    else if dist_cm <= 350 { 13 }
-    else if dist_cm <= 375 { 14 }
-    else if dist_cm <= 400 { 15 }
-    else if dist_cm <= 450 { 16 }
-    else if dist_cm <= 500 { 17 }
-    else if dist_cm <= 525 { 18 }
-    else if dist_cm <= 575 { 19 }
-    else if dist_cm <= 625 { 20 }
-    else if dist_cm <= 675 { 21 }
-    else if dist_cm <= 725 { 22 }
-    else if dist_cm <= 775 { 23 }
-    else if dist_cm <= 850 { 24 }
-    else if dist_cm <= 900 { 25 }
-    else if dist_cm <= 950 { 26 }
-    else if dist_cm <= 1025 { 27 }
-    else if dist_cm <= 1100 { 28 }
-    else if dist_cm <= 1200 { 29 }
-    else if dist_cm <= 1325 { 30 }
-    else if dist_cm <= 1475 { 31 }
-    else if dist_cm <= 1700 { 32 }
-    else if dist_cm <= 2075 { 33 }
-    else if dist_cm <= 3000 { 34 }
-    else if dist_cm <= 3700 { 35 }
-    else { 36 };
+    let correction = if dist_cm <= 25 {
+        0
+    } else if dist_cm <= 50 {
+        2
+    } else if dist_cm <= 75 {
+        3
+    } else if dist_cm <= 100 {
+        4
+    } else if dist_cm <= 125 {
+        5
+    } else if dist_cm <= 150 {
+        6
+    } else if dist_cm <= 175 {
+        8
+    } else if dist_cm <= 200 {
+        9
+    } else if dist_cm <= 225 {
+        10
+    } else if dist_cm <= 275 {
+        11
+    } else if dist_cm <= 300 {
+        12
+    } else if dist_cm <= 350 {
+        13
+    } else if dist_cm <= 375 {
+        14
+    } else if dist_cm <= 400 {
+        15
+    } else if dist_cm <= 450 {
+        16
+    } else if dist_cm <= 500 {
+        17
+    } else if dist_cm <= 525 {
+        18
+    } else if dist_cm <= 575 {
+        19
+    } else if dist_cm <= 625 {
+        20
+    } else if dist_cm <= 675 {
+        21
+    } else if dist_cm <= 725 {
+        22
+    } else if dist_cm <= 775 {
+        23
+    } else if dist_cm <= 850 {
+        24
+    } else if dist_cm <= 900 {
+        25
+    } else if dist_cm <= 950 {
+        26
+    } else if dist_cm <= 1025 {
+        27
+    } else if dist_cm <= 1100 {
+        28
+    } else if dist_cm <= 1200 {
+        29
+    } else if dist_cm <= 1325 {
+        30
+    } else if dist_cm <= 1475 {
+        31
+    } else if dist_cm <= 1700 {
+        32
+    } else if dist_cm <= 2075 {
+        33
+    } else if dist_cm <= 3000 {
+        34
+    } else if dist_cm <= 3700 {
+        35
+    } else {
+        36
+    };
     dist_cm + (-23 + correction)
 }

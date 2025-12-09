@@ -16,23 +16,27 @@ mod peripherals;
 
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_futures::{join::join, select::select};
+use embassy_futures::join::join;
 use embassy_time::{Duration, Timer};
 // Print panic message to probe console
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_stm32::{bind_interrupts, gpio::{Level, Output, Speed}, usb, Config, Peri};
-use embassy_stm32::adc::{Adc, Averaging, SampleTime};
+use crate::peripherals::battery::{BatteryMonitor, SingleCellLiIonBatteryMonitor};
+use crate::peripherals::bootstrap::{BootstrapDevice, STM6600BootstrapDevice};
+use crate::peripherals::led::{IndicatorLed, LtstIndicatorLed};
+use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::peripherals::PA3;
 use embassy_stm32::usb::{Driver, Instance};
-use embassy_usb::Builder;
+use embassy_stm32::{
+    bind_interrupts,
+    gpio::{Level, Output, Speed},
+    usb, Config, Peri,
+};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
-use crate::peripherals::battery::{BatteryMonitor, SingleCellLiIonBatteryMonitor};
-use crate::peripherals::bootstrap::{BootstrapDevice, STM6600BootstrapDevice};
-use crate::peripherals::led::{IndicatorLed, LtstIndicatorLed};
+use embassy_usb::Builder;
 
 bind_interrupts!(struct Irqs {
     USB => usb::InterruptHandler<embassy_stm32::peripherals::USB>;
@@ -45,7 +49,9 @@ async fn main(_spawner: Spawner) {
     let mut config = Config::default();
     {
         use embassy_stm32::rcc::*;
-        config.rcc.hsi48 = Some(Hsi48Config { sync_from_usb: true }); // needed for USB
+        config.rcc.hsi48 = Some(Hsi48Config {
+            sync_from_usb: true,
+        }); // needed for USB
         config.rcc.sys = Sysclk::PLL1_R;
         config.rcc.hsi = true;
         config.rcc.pll = Some(Pll {
@@ -117,22 +123,37 @@ async fn main(_spawner: Spawner) {
     let power_int = ExtiInput::new(p.PB7, p.EXTI7, Pull::Up);
     let ps_hold = Output::new(p.PB5, Level::Low, Speed::Low);
     let mut bootstrap = STM6600BootstrapDevice::new(power_int, ps_hold);
-    bootstrap.initialize().await.expect("Can't initialize bootstrap");
+    bootstrap
+        .initialize()
+        .await
+        .expect("Can't initialize bootstrap");
     // class.write_packet("STM6600 Bootstrap complete\r\n".as_bytes()).await.expect("Can't send message");
 
     // Initialize Battery Monitor
     let adc = Adc::new(p.ADC1);
     let battery_read_pin: Peri<PA3> = p.PA3;
     let mut battery_monitor = SingleCellLiIonBatteryMonitor::new(adc, battery_read_pin);
-    let fist_voltage = battery_monitor.read_voltage_mv().await.expect("Can't read Voltage");
-    let fist_percentage = battery_monitor.read_percentage().await.expect("Can't read Percentage");
-    defmt::info!("Battery monitor initialized with voltage: {} mV -- {}", fist_voltage, fist_percentage);
+    let fist_voltage = battery_monitor
+        .read_voltage_mv()
+        .await
+        .expect("Can't read Voltage");
+    let fist_percentage = battery_monitor
+        .read_percentage()
+        .await
+        .expect("Can't read Percentage");
+    defmt::info!(
+        "Battery monitor initialized with voltage: {} mV -- {}",
+        fist_voltage,
+        fist_percentage
+    );
 
     // Initialize Indicator Led
     let orange_pin = Output::new(p.PA8, Level::Low, Speed::Low);
     let green_pin = Output::new(p.PA9, Level::Low, Speed::Low);
     let mut indicator_led = LtstIndicatorLed::new(orange_pin, green_pin);
-    indicator_led.show_battery_percentage(fist_percentage).expect("Can't set initial LED state");
+    indicator_led
+        .show_battery_percentage(fist_percentage)
+        .expect("Can't set initial LED state");
 
     charger_enable.set_low();
 
@@ -145,7 +166,10 @@ async fn main(_spawner: Spawner) {
         loop {
             info!("Connected");
             class.wait_connection().await;
-            class.write_packet(b"Hello from Embassy!\r\n").await.expect("Can't send message");
+            class
+                .write_packet(b"Hello from Embassy!\r\n")
+                .await
+                .expect("Can't send message");
             let _ = echo(&mut class).await;
             // info!("Disconnected");
             Timer::after(Duration::from_millis(200)).await;
@@ -168,7 +192,9 @@ impl From<EndpointError> for Disconnected {
     }
 }
 
-async fn echo<'d, T: Instance + 'd>(class: &mut CdcAcmClass<'d, Driver<'d, T>>) -> Result<(), Disconnected> {
+async fn echo<'d, T: Instance + 'd>(
+    class: &mut CdcAcmClass<'d, Driver<'d, T>>,
+) -> Result<(), Disconnected> {
     let mut buf = [0; 64];
     loop {
         let n = class.read_packet(&mut buf).await?;

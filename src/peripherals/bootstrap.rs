@@ -18,7 +18,7 @@ where
     power_int: ExtiInput<'a>,
     ps_hold: PsHold,
 }
-impl <'a, PsHold> STM6600BootstrapDevice<'a, PsHold>
+impl<'a, PsHold> STM6600BootstrapDevice<'a, PsHold>
 where
     PsHold: OutputPin,
 {
@@ -27,7 +27,7 @@ where
     }
 }
 
-impl <'a, PsHold> BootstrapDevice for STM6600BootstrapDevice<'a, PsHold>
+impl<'a, PsHold> BootstrapDevice for STM6600BootstrapDevice<'a, PsHold>
 where
     PsHold: OutputPin,
 {
@@ -36,6 +36,8 @@ where
         // Initialization code specific to STM6600
         defmt::info!("Initializing STM6600 Bootstrap Device");
         self.power_int.wait_for_high().await;
-        self.ps_hold.set_high().map_err(BootstrapError::InitializationFailed)
+        self.ps_hold
+            .set_high()
+            .map_err(BootstrapError::InitializationFailed)
     }
 }
