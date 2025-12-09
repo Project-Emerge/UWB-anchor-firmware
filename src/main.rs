@@ -27,13 +27,10 @@ use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::peripherals::PA3;
-use embassy_stm32::usb::{Driver, Instance};
 use embassy_stm32::{
     gpio::{Level, Output, Speed},
     Config, Peri,
 };
-use embassy_usb::class::cdc_acm::CdcAcmClass;
-use embassy_usb::driver::EndpointError;
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
@@ -108,28 +105,5 @@ async fn main(_spawner: Spawner) {
 
     loop {
         Timer::after(Duration::from_millis(100)).await;
-    }
-}
-
-struct Disconnected {}
-
-impl From<EndpointError> for Disconnected {
-    fn from(val: EndpointError) -> Self {
-        match val {
-            EndpointError::BufferOverflow => panic!("Buffer overflow"),
-            EndpointError::Disabled => Disconnected {},
-        }
-    }
-}
-
-async fn echo<'d, T: Instance + 'd>(
-    class: &mut CdcAcmClass<'d, Driver<'d, T>>,
-) -> Result<(), Disconnected> {
-    let mut buf = [0; 64];
-    loop {
-        let n = class.read_packet(&mut buf).await?;
-        let data = &buf[..n];
-        info!("data: {:x}", data);
-        class.write_packet(data).await?;
     }
 }
