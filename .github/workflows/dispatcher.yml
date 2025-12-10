@@ -13,10 +13,6 @@ on:
       - '.mergify.yml'
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
   cancel-in-progress: ${{ !contains(github.ref, 'master') }}
@@ -46,6 +42,7 @@ jobs:
     needs: [ dispatcher ]
     uses: ./.github/workflows/build-and-release.yml
     permissions:
+      pull-requests: write
       contents: write
       packages: write
       security-events: write
