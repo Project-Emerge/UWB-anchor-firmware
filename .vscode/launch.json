@@ -1,94 +1,26 @@
 {
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Remote debug",
-            "type": "gdb",
+            "name": "Debug UWB-Anchor",
             "request": "launch",
+            "type": "cortex-debug",
             "cwd": "${workspaceRoot}",
-            "target": "${workspaceRoot}/target/thumbv7em-none-eabihf/debug/uwb-anchor", 
-            "gdbpath" : "arm-none-eabi-gdb",
-            "autorun": [
-                "source -v debug.gdb",
-            ]
-        },
-        // {
-        //     "preLaunchTask": "cargo_build_debug",
-        //     "type": "probe-rs-debug",
-        //     "request": "launch",
-        //     "name": "probe-rs-debugger",
-        //     // "server": "127.0.0.1:50001", // For connecting to an existing probe-rs-debugger process
-        //     "chip": "STM32L432KBUx",
-        //     "cwd": "${workspaceFolder}",
-        //     "coreConfigs": [
-        //         {
-        //             "programBinary": "target/thumbv7em-none-eabihf/debug/uwb-anchor-firmware",
-        //             "coreIndex": 0,
-                    
-        //             "svdFile": "stm32l432.svd",
-                    
-        //             "rttEnabled": true,
-        //             "rttChannelFormats": [
-        //                 {
-        //                     "dataFormat": "String",
-        //                     "channelNumber": 0,
-        //                     "showTimestamps": true
-        //                 }
-        //             ],
-        //         },
-        //     ],
-        //     "runtimeExecutable": "probe-rs",
-        //     "runtimeArgs": ["dap-server"],
-        //     "flashingConfig": {
-        //       "flashingEnabled": true,
-        //       "haltAfterReset": false,
-        //       "formatOptions": {
-        //         "format": "elf" //!MODIFY (or remove). Valid values are: 'bin', 'hex', 'elf'(default), 'idf'
-        //       }
-        //     },
-        //     "connectUnderReset": false,
-        //     "consoleLogLevel": "Console" //Info, Debug
-        //     //"speed": 24000, //!MODIFY (or remove)
-        //     //"probe": "VID:PID:<Serial>", //!MODIFY (or remove)
-        // },
-        // {
-        //     "preLaunchTask": "cargo_build_release",
-        //     "type": "probe-rs-debug",
-        //     "request": "launch",
-        //     "name": "probe-rs-release",
-        //     // "server": "127.0.0.1:50001", // For connecting to an existing probe-rs-debugger process
-        //     "chip": "STM32L432KBUx",
-        //     "cwd": "${workspaceFolder}",
-        //     "coreConfigs": [
-        //         {
-        //             "programBinary": "target/thumbv7em-none-eabihf/release/uwb-anchor-firmware",
-        //             "coreIndex": 0,
-                    
-        //             "svdFile": "stm32l432.svd",
-                    
-        //             "rttEnabled": true,
-        //             "rttChannelFormats": [
-        //                 {
-        //                     "dataFormat": "String",
-        //                     "channelNumber": 0,
-        //                     "showTimestamps": true
-        //                 }
-        //             ],
-        //         },
-        //     ],
-        //     "runtimeExecutable": "probe-rs",
-        //     "runtimeArgs": ["dap-server"],
-        //     "flashingConfig": {
-        //       "flashingEnabled": true,
-        //       "haltAfterReset": false,
-        //       "formatOptions": {
-        //         "format": "elf" //!MODIFY (or remove). Valid values are: 'bin', 'hex', 'elf'(default), 'idf'
-        //       }
-        //     },
-        //     "connectUnderReset": false,
-        //     "consoleLogLevel": "Console" //Info, Debug
-        //     //"speed": 24000, //!MODIFY (or remove)
-        //     //"probe": "VID:PID:<Serial>", //!MODIFY (or remove)
-        // },
+            "executable": "${workspaceFolder}/target/thumbv7em-none-eabihf/release/uwb-anchor",
+            "svdFile": "${workspaceFolder}/stm32l4x2.svd",
+            "servertype": "openocd",
+            "configFiles": ["stm32l432.cfg"],
+            "preLaunchTask": "Build binary",
+            "preLaunchCommands": [
+                "monitor init",
+                "monitor reset init",
+                "monitor halt",
+                "monitor flash write_image erase ./target/thumbv7em-none-eabihf/release/uwb-anchor 0x08000000"
+            ],
+            "postLaunchCommands": ["continue"] // Don't stop before at the first line
+        }
     ]
 }

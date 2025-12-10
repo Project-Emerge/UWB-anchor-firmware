@@ -6,6 +6,7 @@ rustflags = [
   "-C", "link-arg=--nmagic",
   "-C", "link-arg=-Tlink.x",
   "-C", "link-arg=-Tdefmt.x",
+  "-g"
 ]
 
 # STM32F103 configuration
