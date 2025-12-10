@@ -1,7 +1,7 @@
 # STM32L432KC configuration
 [target.thumbv7em-none-eabihf]
-runner = "dfu --chip stm32"
-#runner = "probe-rs run --chip STM32L432KBUx"
+#runner = "dfu --chip stm32"
+runner = "probe-rs run --chip STM32L432KBUx"
 rustflags = [
   "-C", "link-arg=--nmagic",
   "-C", "link-arg=-Tlink.x",
@@ -22,5 +22,5 @@ rustflags = [
 target = "thumbv7em-none-eabihf"
 
 [env]
-DEFMT_LOG = "info"
+DEFMT_LOG = "debug"
 #CHIPSERIE = "stm32l432"

@@ -33,7 +33,7 @@ use embassy_stm32::{
 };
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     info!("Launching anchor");
 
     let mut config = Config::default();
@@ -50,7 +50,7 @@ async fn main(_spawner: Spawner) {
             mul: PllMul::MUL10,
             divp: None,
             divq: None,
-            divr: Some(PllRDiv::DIV2), // sysclk 80Mhz (16 / 1 * 10 / 2)
+            divr: Some(PllRDiv::DIV8), // sysclk 80Mhz (16 / 1 * 10 / 2)
         });
         config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
         config.rcc.mux.adcsel = mux::Adcsel::SYS; // Enable ADC clock from system clock
@@ -69,33 +69,17 @@ async fn main(_spawner: Spawner) {
         .initialize()
         .await
         .expect("Can't initialize bootstrap");
-    // class.write_packet("STM6600 Bootstrap complete\r\n".as_bytes()).await.expect("Can't send message");
 
     // Initialize Battery Monitor
     let adc = Adc::new(p.ADC1);
     let battery_read_pin: Peri<PA3> = p.PA3;
-    let mut battery_monitor = SingleCellLiIonBatteryMonitor::new(adc, battery_read_pin);
-    let fist_voltage = battery_monitor
-        .read_voltage_mv()
-        .await
-        .expect("Can't read Voltage");
-    let fist_percentage = battery_monitor
-        .read_percentage()
-        .await
-        .expect("Can't read Percentage");
-    defmt::info!(
-        "Battery monitor initialized with voltage: {} mV -- {}",
-        fist_voltage,
-        fist_percentage
-    );
-
     // Initialize Indicator Led
     let orange_pin = Output::new(p.PA8, Level::Low, Speed::Low);
     let green_pin = Output::new(p.PA9, Level::Low, Speed::Low);
-    let mut indicator_led = LtstIndicatorLed::new(orange_pin, green_pin);
-    indicator_led
-        .show_battery_percentage(fist_percentage)
-        .expect("Can't set initial LED state");
+
+    spawner
+        .spawn(monitor_battery(adc, battery_read_pin, orange_pin, green_pin))
+        .expect("Failed to spawn battery monitor task");
 
     charger_enable.set_low();
 
@@ -103,7 +87,24 @@ async fn main(_spawner: Spawner) {
     charger_en1.set_high();
     charger_en2.set_low();
 
+    info!("Anchor initialization complete");
+
     loop {
         Timer::after(Duration::from_millis(100)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn monitor_battery(adc: Adc<'static, embassy_stm32::peripherals::ADC1>, peri: Peri<'static, PA3>, orange_pin: Output<'static>, green_pin: Output<'static>) {
+    let mut battery_monitor = SingleCellLiIonBatteryMonitor::new(adc, peri);
+    let mut indicator_led = LtstIndicatorLed::new(orange_pin, green_pin);
+    loop {
+        let percentage = battery_monitor.read_percentage()
+            .await
+            .expect("Can't read Percentage");
+
+        info!("Battery Percentage: {}%", percentage);
+        indicator_led.show_battery_percentage(percentage).expect("Can't set LED state");
+        Timer::after(Duration::from_secs(1)).await;
     }
 }

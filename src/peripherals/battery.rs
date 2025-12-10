@@ -1,4 +1,5 @@
 use core::convert::Infallible;
+use defmt::debug;
 use embassy_stm32::adc::{Adc, AdcChannel, Instance, SampleTime};
 
 pub trait BatteryMonitor {
@@ -32,10 +33,11 @@ impl<'a, T: Instance, P: AdcChannel<T>> SingleCellLiIonBatteryMonitor<'a, T, P> 
     /// Read raw ADC value with moving average filtering
     async fn read_filtered_adc(&mut self) -> u16 {
         // Set sample time for accurate reading
-        self.adc.set_sample_time(SampleTime::CYCLES12_5);
+        self.adc.set_sample_time(SampleTime::CYCLES92_5);
 
         // Read raw ADC value
         let raw_value: u16 = self.adc.blocking_read(&mut self.channel);
+        debug!("Raw ADC Value: {}", raw_value);
 
         // Update circular buffer
         self.filter_buffer[self.filter_index] = raw_value;
@@ -61,10 +63,7 @@ impl<'a, T: Instance, P: AdcChannel<T>> BatteryMonitor for SingleCellLiIonBatter
     async fn read_voltage_mv(&mut self) -> Result<u16, Self::Error> {
         // Read filtered ADC value (moving average)
         let filtered_value = self.read_filtered_adc().await;
-
-        // Convert raw ADC value to millivolts (assuming 3.3V reference and 12-bit ADC)
         let measured_mv = (filtered_value as u32 * 3300 / 4095) as u16;
-
         // Account for voltage divider: Vbat -- 10k -- Pin -- 20k -- GND
         // Voltage divider ratio: Vpin = Vbat * (20k / (10k + 20k)) = Vbat * (2/3)
         // Therefore: Vbat = Vpin * (3/2) = Vpin * 1.5
@@ -77,12 +76,12 @@ impl<'a, T: Instance, P: AdcChannel<T>> BatteryMonitor for SingleCellLiIonBatter
         let voltage_mv = self.read_voltage_mv().await?;
         // Simple linear approximation for Li-Ion battery percentage
         // Typical single-cell Li-Ion: 4.2V (full) to 3.0V (empty)
-        let percentage = if voltage_mv >= 4200 {
+        let percentage = if voltage_mv >= 4150 {
             100
         } else if voltage_mv <= 3000 {
             0
         } else {
-            ((voltage_mv - 3000) * 100 / (4200 - 3000)) as u8
+            ((voltage_mv - 3000) as u32 * 100 / 1150) as u8
         };
         Ok(percentage)
     }
