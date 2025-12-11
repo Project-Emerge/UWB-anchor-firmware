@@ -20,9 +20,9 @@ use embassy_time::{Duration, Timer};
 // Print panic message to probe console
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::peripherals::battery::{BatteryMonitor, SingleCellLiIonBatteryMonitor};
-use crate::peripherals::bootstrap::{BootstrapDevice, STM6600BootstrapDevice};
-use crate::peripherals::led::{IndicatorLed, LtstIndicatorLed};
+use peripherals::battery::{BatteryMonitor, SingleCellLiIonBatteryMonitor};
+use peripherals::bootstrap::{BootstrapDevice, STM6600BootstrapDevice};
+use peripherals::led::{IndicatorLed, LtstIndicatorLed};
 use embassy_stm32::adc::Adc;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
@@ -87,6 +87,14 @@ async fn main(spawner: Spawner) {
     charger_en1.set_high();
     charger_en2.set_low();
 
+    spawner
+        .spawn(manage_button())
+        .expect("Failed to spawn button management task");
+
+    spawner
+        .spawn(manage_uwb_antenna())
+        .expect("Failed to spawn UWB antenna management task");
+
     info!("Anchor initialization complete");
 
     loop {
@@ -106,5 +114,21 @@ async fn monitor_battery(adc: Adc<'static, embassy_stm32::peripherals::ADC1>, pe
         info!("Battery Percentage: {}%", percentage);
         indicator_led.show_battery_percentage(percentage).expect("Can't set LED state");
         Timer::after(Duration::from_secs(1)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn manage_button() {
+    // Placeholder for button management logic
+    loop {
+        Timer::after(Duration::from_secs(10)).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn manage_uwb_antenna() {
+    loop {
+        // Placeholder for UWB antenna management logic
+        Timer::after(Duration::from_secs(10)).await;
     }
 }
