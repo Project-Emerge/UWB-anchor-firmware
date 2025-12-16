@@ -2088,6 +2088,7 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt 1.0.1",
+ "defmt-rtt",
  "dw1000",
  "embassy-executor",
  "embassy-stm32",
@@ -2098,6 +2099,7 @@ dependencies = [
  "embedded-hal-bus",
  "panic-probe",
  "reqwest",
+ "uwb-anchor",
 ]
 
 [[package]]

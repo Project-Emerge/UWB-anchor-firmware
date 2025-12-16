@@ -14,16 +14,19 @@
 
 mod peripherals;
 
-use defmt::info;
+use defmt::{info, warn};
+use dw1000::{RxConfig, mac, ranging::{self, Message}};
+use embassy_time::{Delay, with_timeout};
 use embassy_executor::Spawner;
 use embassy_time::{Duration, Timer};
+use embedded_hal_bus::spi::ExclusiveDevice;
 // Print panic message to probe console
 use {defmt_rtt as _, panic_probe as _};
 
 use peripherals::battery::{BatteryMonitor, SingleCellLiIonBatteryMonitor};
 use peripherals::bootstrap::{BootstrapDevice, STM6600BootstrapDevice};
 use peripherals::led::{IndicatorLed, LtstIndicatorLed};
-use embassy_stm32::adc::Adc;
+use embassy_stm32::{adc::Adc, gpio::Flex, mode::Async, spi::Spi};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::peripherals::PA3;
@@ -55,7 +58,7 @@ async fn main(spawner: Spawner) {
         config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
         config.rcc.mux.adcsel = mux::Adcsel::SYS; // Enable ADC clock from system clock
     }
-    let p = embassy_stm32::init(config);
+    let p: embassy_stm32::Peripherals = embassy_stm32::init(config);
 
     let mut charger_enable = Output::new(p.PA10, Level::Low, Speed::Low);
     let mut charger_en1 = Output::new(p.PB0, Level::Low, Speed::Low);
@@ -87,18 +90,165 @@ async fn main(spawner: Spawner) {
     charger_en1.set_high();
     charger_en2.set_low();
 
-    spawner
-        .spawn(manage_button())
-        .expect("Failed to spawn button management task");
+    let spi: Spi<'_, embassy_stm32::mode::Async> = Spi::new(p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA1_CH3, p.DMA1_CH2, Default::default());
+    let cs = Output::new(p.PA4, Level::High, Speed::High);
+    let spi_device = ExclusiveDevice::new(spi, cs, Delay).expect("Unable to get SPI device");
+    let mut uwb_irq = ExtiInput::new(p.PA2, p.EXTI2, Pull::None);
+    let mut uwb_reset = Flex::new(p.PA1);
 
-    spawner
-        .spawn(manage_uwb_antenna())
-        .expect("Failed to spawn UWB antenna management task");
+    let dw1000 = dw1000::DW1000::new(spi_device);
+
+    // spawner
+    //     .spawn(manage_button())
+    //     .expect("Failed to spawn button management task");
+
+    // spawner
+    //     .spawn(manage_uwb_antenna())
+    //     .expect("Failed to spawn UWB antenna management task");
 
     info!("Anchor initialization complete");
 
+    // Initialize UWB module
+    uwb_reset.set_as_output(Speed::Low);
+    uwb_reset.set_low();
+    Timer::after(Duration::from_millis(100)).await;
+    uwb_reset.set_high();
+    uwb_reset.set_as_input(Pull::None);
+    // Enable interrupts
+    let mut dw1000 = dw1000.init(&mut Delay).unwrap();
+    dw1000.enable_rx_interrupts().unwrap();
+    dw1000.enable_tx_interrupts().unwrap();
+    // Set antenna delays (hardcoded calibration values)
+    dw1000.set_antenna_delay(16456, 16300).unwrap();
+    // Set device address
+    dw1000
+        .set_address(
+            mac::PanId(0x0d57),                 // hardcoded network id
+            mac::ShortAddress(3344u16),         // random device address
+        )
+        .expect("Failed to set address");
+
+    let mut buf = [0; 128];
+
+    let mut frame_id = 0;
+    let mut ping_id = 0;
+    let mut last_ping_time = embassy_time::Instant::now();
+
+    // Create indicator LEDs (if you have them available - adjust based on your hardware)
+    // let mut led_d9 = Output::new(p.PX, Level::Low, Speed::Low);
+    // let mut led_d10 = Output::new(p.PX, Level::Low, Speed::Low);
+    // let mut led_d11 = Output::new(p.PX, Level::Low, Speed::Low);
+    // let mut led_d12 = Output::new(p.PX, Level::Low, Speed::Low);
+
     loop {
-        Timer::after(Duration::from_millis(100)).await;
+        // Send ping every 5 seconds
+        if last_ping_time.elapsed() >= Duration::from_secs(5) {
+            info!("Sending ping {}", ping_id);
+            ping_id += 1;
+            last_ping_time = embassy_time::Instant::now();
+
+            // Indicate ping transmission (LED D10)
+            // led_d10.set_high();
+            Timer::after_millis(10).await;
+            // led_d10.set_low();
+
+            let mut sending = ranging::Ping::new(&mut dw1000)
+                .expect("Failed to initiate ping")
+                .send::<ExclusiveDevice<Spi<Async>, Output, Delay>, Output>(dw1000)
+                .expect("Failed to initiate ping transmission");
+
+            match with_timeout(Duration::from_millis(500), uwb_irq.wait_for_rising_edge()).await {
+                Ok(()) => {}
+                Err(_) => {
+                    warn!("Timeout waiting for ping transmit");
+                    dw1000 = sending.finish_sending().expect("Failed to finish sending");
+                    continue;
+                }
+            }
+            sending.wait_transmit().expect("Failed to send ping");
+            dw1000 = sending.finish_sending().expect("Failed to finish sending");
+        }
+
+        info!("Starting receive. Frame ID: {}", frame_id);
+        frame_id += 1;
+
+        let mut receiving = dw1000
+            .receive(RxConfig::default())
+            .expect("Failed to receive message");
+
+        let result = with_timeout(Duration::from_millis(500), uwb_irq.wait_for_rising_edge()).await;
+
+        let message = match result {
+            Ok(_) => {
+                match receiving.wait_receive(&mut buf) {
+                    Ok(msg) => msg,
+                    Err(_) => {
+                        warn!("Phy error receiving message");
+                        dw1000 = receiving
+                            .finish_receiving()
+                            .expect("Failed to finish receiving");
+                        continue;
+                    }
+                }
+            }
+            Err(_) => {
+                info!("Msg not found");
+                dw1000 = receiving
+                    .finish_receiving()
+                    .expect("Failed to finish receiving");
+                continue;
+            }
+        };
+
+        dw1000 = receiving
+            .finish_receiving()
+            .expect("Failed to finish receiving");
+
+        info!("Response found");
+
+        // Indicate message received (LED D11)
+        // led_d11.set_high();
+        Timer::after_millis(10).await;
+        // led_d11.set_low();
+
+        let request = ranging::Request::decode::<ExclusiveDevice<Spi<'_, Async>, Output<'_>, Delay>>(&message);
+        let request = match request {
+            Ok(Some(request)) => request,
+            Ok(None) | Err(_) => {
+                info!("Ignoring message that is not a request\n");
+                continue;
+            }
+        };
+
+        // Indicate valid request decoded (LED D12)
+        // led_d12.set_high();
+        Timer::after_millis(10).await;
+        // led_d12.set_low();
+
+        // Wait for a moment, to give the tag a chance to start listening for the reply
+        Timer::after_millis(10).await;
+
+        // Send ranging response
+        let mut sending = ranging::Response::new(&mut dw1000, &request)
+            .expect("Failed to initiate response")
+            .send::<ExclusiveDevice<Spi<Async>, Output, Delay>, Output>(dw1000)
+            .expect("Failed to initiate response transmission");
+
+        match with_timeout(Duration::from_millis(100), uwb_irq.wait_for_rising_edge()).await {
+            Ok(()) => {}
+            Err(_) => {
+                warn!("Timeout waiting for response transmit");
+                dw1000 = sending.finish_sending().expect("Failed to finish sending");
+                continue;
+            }
+        }
+        sending.wait_transmit().expect("Failed to send ranging response");
+        dw1000 = sending.finish_sending().expect("Failed to finish sending");
+
+        // Indicate response sent (LED D9)
+        // led_d9.set_high();
+        Timer::after_millis(10).await;
+        // led_d9.set_low();
     }
 }
 

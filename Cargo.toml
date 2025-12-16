@@ -45,7 +45,7 @@ embedded-hal-async = { version = "1.0" }
 embedded-hal-bus = { version = "0.3.0", features = ["async"] }
 
 # Embassy dependencies
-embassy-stm32 = { version = "0.4.0", features = [ "stm32l432kc", "defmt", "unstable-pac", "memory-x", "time-driver-any", "exti", "chrono"] }
+embassy-stm32 = { version = "0.4.0", features = [ "stm32l432kc", "defmt", "unstable-pac", "memory-x", "time-driver-tim1", "exti", "chrono"] }
 embassy-sync = { version = "0.7.2", features = ["defmt"] }
 embassy-executor = { version = "0.9.0", features = [ "arch-cortex-m", "executor-interrupt", "executor-thread", "defmt" ] }
 embassy-time = { version = "0.5.0", features = [ "defmt", "defmt-timestamp-uptime", "tick-hz-32_768" ] }
@@ -62,6 +62,10 @@ defmt-rtt = "1.0.0"
 dw1000 = { git = "https://github.com/jkelleyrtp/dw1000-rs" }
 
 anyhow = { version = "1.0", default-features = false }
+
+[lib]
+name = "uwb_anchor"
+path = "src/lib.rs"
 
 [workspace.dependencies.reqwest]
 version = "0.11"

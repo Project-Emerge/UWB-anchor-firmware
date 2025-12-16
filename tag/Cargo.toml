@@ -20,8 +20,12 @@ embassy-time = { workspace = true }
 
 # Defmt for logging
 defmt = { workspace = true }
+defmt-rtt = { workspace = true }
 
 dw1000 = { workspace = true }
+
+uwb-anchor = { path = "..", default-features = false }
+
 
 [build-dependencies]
 reqwest = { workspace = true }
