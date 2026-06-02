@@ -13,26 +13,30 @@
 #![no_std]
 
 use defmt::{info, warn};
-use dw1000::{RxConfig, mac, ranging::{self, Message}};
-use embassy_time::{Delay, with_timeout};
+use dw1000::{
+    mac,
+    ranging::{self, Message},
+    RxConfig,
+};
 use embassy_executor::Spawner;
+use embassy_time::{with_timeout, Delay};
 use embassy_time::{Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use uwb_anchor::peripherals;
 // Print panic message to probe console
 use {defmt_rtt as _, panic_probe as _};
 
-use peripherals::battery::{BatteryMonitor, SingleCellLiIonBatteryMonitor};
-use peripherals::bootstrap::{BootstrapDevice, STM6600BootstrapDevice};
-use peripherals::led::{IndicatorLed, LtstIndicatorLed};
-use embassy_stm32::{adc::Adc, gpio::Flex, mode::Async, spi::Spi};
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::Pull;
 use embassy_stm32::peripherals::PA3;
+use embassy_stm32::{adc::Adc, gpio::Flex, mode::Async, spi::Spi};
 use embassy_stm32::{
     gpio::{Level, Output, Speed},
     Config, Peri,
 };
+use peripherals::battery::{BatteryMonitor, SingleCellLiIonBatteryMonitor};
+use peripherals::bootstrap::{BootstrapDevice, STM6600BootstrapDevice};
+use peripherals::led::{IndicatorLed, LtstIndicatorLed};
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -80,7 +84,12 @@ async fn main(spawner: Spawner) {
     let green_pin = Output::new(p.PA9, Level::Low, Speed::Low);
 
     spawner
-        .spawn(monitor_battery(adc, battery_read_pin, orange_pin, green_pin))
+        .spawn(monitor_battery(
+            adc,
+            battery_read_pin,
+            orange_pin,
+            green_pin,
+        ))
         .expect("Failed to spawn battery monitor task");
 
     charger_enable.set_low();
@@ -89,7 +98,15 @@ async fn main(spawner: Spawner) {
     charger_en1.set_low();
     charger_en2.set_low();
 
-    let spi: Spi<'_, embassy_stm32::mode::Async> = Spi::new(p.SPI1, p.PA5, p.PA7, p.PA6, p.DMA1_CH3, p.DMA1_CH2, Default::default());
+    let spi: Spi<'_, embassy_stm32::mode::Async> = Spi::new(
+        p.SPI1,
+        p.PA5,
+        p.PA7,
+        p.PA6,
+        p.DMA1_CH3,
+        p.DMA1_CH2,
+        Default::default(),
+    );
     let cs = Output::new(p.PA4, Level::High, Speed::High);
     let spi_device = ExclusiveDevice::new(spi, cs, Delay).expect("Unable to get SPI device");
     let mut uwb_irq = ExtiInput::new(p.PA2, p.EXTI2, Pull::None);
@@ -122,8 +139,8 @@ async fn main(spawner: Spawner) {
     // Set device address
     dw1000
         .set_address(
-            mac::PanId(0x0d57),                 // hardcoded network id
-            mac::ShortAddress(3344u16),         // random device address
+            mac::PanId(0x0d57),         // hardcoded network id
+            mac::ShortAddress(3344u16), // random device address
         )
         .expect("Failed to set address");
 
@@ -141,7 +158,7 @@ async fn main(spawner: Spawner) {
 
     loop {
         info!("waiting for base station ping");
-        
+
         let mut receiving = dw1000
             .receive(RxConfig::default())
             .expect("Failed to receive message");
@@ -150,17 +167,15 @@ async fn main(spawner: Spawner) {
         let result = with_timeout(Duration::from_millis(500), uwb_irq.wait_for_high()).await;
 
         let message = match result {
-            Ok(_) => {
-                match receiving.wait_receive(&mut buf) {
-                    Ok(msg) => msg,
-                    Err(_) => {
-                        dw1000 = receiving
-                            .finish_receiving()
-                            .expect("Failed to finish receiving");
-                        continue;
-                    }
+            Ok(_) => match receiving.wait_receive(&mut buf) {
+                Ok(msg) => msg,
+                Err(_) => {
+                    dw1000 = receiving
+                        .finish_receiving()
+                        .expect("Failed to finish receiving");
+                    continue;
                 }
-            }
+            },
             Err(_) => {
                 info!("Timeout error occured");
                 dw1000 = receiving
@@ -177,9 +192,10 @@ async fn main(spawner: Spawner) {
         info!("msg from base station: received");
 
         // Try to decode as Ping
-        let ping = ranging::Ping::decode::<ExclusiveDevice<Spi<'_, Async>, Output<'_>, Delay>>(&message)
-            .expect("Failed to decode ping");
-        
+        let ping =
+            ranging::Ping::decode::<ExclusiveDevice<Spi<'_, Async>, Output<'_>, Delay>>(&message)
+                .expect("Failed to decode ping");
+
         if let Some(ping) = ping {
             // Received ping from an anchor. Reply with a ranging request.
 
@@ -191,15 +207,24 @@ async fn main(spawner: Spawner) {
             // Wait for a moment, to give the anchor a chance to start listening for the reply.
             Timer::after_millis(10).await;
 
-            let mut sending = ranging::Request::new::<ExclusiveDevice<embassy_stm32::spi::Spi<'_, embassy_stm32::mode::Async>, embassy_stm32::gpio::Output<'_>, Delay>, embassy_stm32::gpio::Output<'_>>(&mut dw1000, &ping)
-                .expect("Failed to initiate request")
-                .send::<ExclusiveDevice<Spi<Async>, Output, Delay>, Output>(dw1000)
-                .expect("Failed to initiate request transmission");
+            let mut sending = ranging::Request::new::<
+                ExclusiveDevice<
+                    embassy_stm32::spi::Spi<'_, embassy_stm32::mode::Async>,
+                    embassy_stm32::gpio::Output<'_>,
+                    Delay,
+                >,
+                embassy_stm32::gpio::Output<'_>,
+            >(&mut dw1000, &ping)
+            .expect("Failed to initiate request")
+            .send::<ExclusiveDevice<Spi<Async>, Output, Delay>, Output>(dw1000)
+            .expect("Failed to initiate request transmission");
 
             // Wait for transmission complete interrupt with timeout
             match with_timeout(Duration::from_millis(500), uwb_irq.wait_for_rising_edge()).await {
                 Ok(()) => {
-                    sending.wait_transmit().expect("Failed to send ranging request");
+                    sending
+                        .wait_transmit()
+                        .expect("Failed to send ranging request");
                 }
                 Err(_) => {
                     warn!("Timeout waiting for request transmit");
@@ -214,9 +239,11 @@ async fn main(spawner: Spawner) {
         }
 
         // Try to decode as Response
-        let response = ranging::Response::decode::<ExclusiveDevice<Spi<'_, Async>, Output<'_>, Delay>>(&message)
-            .expect("Failed to decode response");
-        
+        let response = ranging::Response::decode::<
+            ExclusiveDevice<Spi<'_, Async>, Output<'_>, Delay>,
+        >(&message)
+        .expect("Failed to decode response");
+
         if let Some(response) = response {
             // Received ranging response from anchor. Now we can compute the distance.
 
@@ -255,16 +282,24 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn monitor_battery(adc: Adc<'static, embassy_stm32::peripherals::ADC1>, peri: Peri<'static, PA3>, orange_pin: Output<'static>, green_pin: Output<'static>) {
+async fn monitor_battery(
+    adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
+    peri: Peri<'static, PA3>,
+    orange_pin: Output<'static>,
+    green_pin: Output<'static>,
+) {
     let mut battery_monitor = SingleCellLiIonBatteryMonitor::new(adc, peri);
     let mut indicator_led = LtstIndicatorLed::new(orange_pin, green_pin);
     loop {
-        let percentage = battery_monitor.read_percentage()
+        let percentage = battery_monitor
+            .read_percentage()
             .await
             .expect("Can't read Percentage");
 
         info!("Battery Percentage: {}%", percentage);
-        indicator_led.show_battery_percentage(percentage).expect("Can't set LED state");
+        indicator_led
+            .show_battery_percentage(percentage)
+            .expect("Can't set LED state");
         Timer::after(Duration::from_secs(1)).await;
     }
 }
