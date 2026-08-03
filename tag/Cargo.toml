@@ -22,9 +22,25 @@ embassy-time = { workspace = true }
 defmt = { workspace = true }
 defmt-rtt = { workspace = true }
 
-dw1000 = { workspace = true }
+dw3000-ng = { workspace = true }
+smoltcp = { workspace = true }
 
 uwb-anchor = { path = "..", default-features = false }
+
+[features]
+default = ["tag-1"]
+tag-1 = []
+tag-2 = []
+tag-3 = []
+tag-4 = []
+tag-5 = []
+tag-6 = []
+tag-7 = []
+tag-8 = []
+tag-9 = []
+tag-10 = []
+tag-11 = []
+tag-12 = []
 
 
 [build-dependencies]

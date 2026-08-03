@@ -1,53 +1,70 @@
-//! Range measurement anchor node
+//! Temporary DWM3000 tag used to validate anchor ranging.
 //!
-//! This is an anchor node used for range measurement. Anchors have a known
-//! location, and provide the support infrastructure requires by tag nodes to
-//! determine their own distance from the available anchors.
-//!
-//! Currently, distance measurements have a highly inaccurate result. One reason
-//! that could account for this is the lack of antenna delay calibration, but
-//! it's possible that there are various hidden bugs that contribute to this.
+//! The tag listens continuously, answers only polls addressed to its static
+//! short address, and computes the asymmetric DS-TWR distance on reception of
+//! the anchor response. Robot firmware can consume the resulting
+//! `(anchor_id, distance_mm)` measurements for trilateration.
 
 #![allow(dead_code)]
 #![no_main]
 #![no_std]
 
 use defmt::{info, warn};
-use dw1000::{
-    mac,
-    ranging::{self, Message},
-    RxConfig,
-};
+use dw3000_ng::{hl::SendTime, time::Instant, Config, DW3000};
 use embassy_executor::Spawner;
-use embassy_time::{with_timeout, Delay};
-use embassy_time::{Duration, Timer};
+use embassy_stm32::exti::ExtiInput;
+use embassy_stm32::gpio::{Level, Output, Pull, Speed};
+use embassy_stm32::peripherals::PA3;
+use embassy_stm32::{adc::Adc, gpio::Flex, mode::Async, spi::Spi, Config as StmConfig, Peri};
+use embassy_time::{with_timeout, Delay, Duration, Timer};
+use embedded_hal_async::spi::SpiDevice;
 use embedded_hal_bus::spi::ExclusiveDevice;
+use smoltcp::wire::{Ieee802154Address, Ieee802154Pan};
 use uwb_anchor::peripherals;
-// Print panic message to probe console
+use uwb_anchor::uwb::{self, delayed_after, radio_config, Packet, PAN_ID, RX_TIMEOUT_US, TAG_IDS};
 use {defmt_rtt as _, panic_probe as _};
 
-use embassy_stm32::exti::ExtiInput;
-use embassy_stm32::gpio::Pull;
-use embassy_stm32::peripherals::PA3;
-use embassy_stm32::{adc::Adc, gpio::Flex, mode::Async, spi::Spi};
-use embassy_stm32::{
-    gpio::{Level, Output, Speed},
-    Config, Peri,
-};
 use peripherals::battery::{BatteryMonitor, SingleCellLiIonBatteryMonitor};
 use peripherals::bootstrap::{BootstrapDevice, STM6600BootstrapDevice};
 use peripherals::led::{IndicatorLed, LtstIndicatorLed};
 
+#[cfg(feature = "tag-1")]
+const TAG_INDEX: usize = 0;
+#[cfg(feature = "tag-2")]
+const TAG_INDEX: usize = 1;
+#[cfg(feature = "tag-3")]
+const TAG_INDEX: usize = 2;
+#[cfg(feature = "tag-4")]
+const TAG_INDEX: usize = 3;
+#[cfg(feature = "tag-5")]
+const TAG_INDEX: usize = 4;
+#[cfg(feature = "tag-6")]
+const TAG_INDEX: usize = 5;
+#[cfg(feature = "tag-7")]
+const TAG_INDEX: usize = 6;
+#[cfg(feature = "tag-8")]
+const TAG_INDEX: usize = 7;
+#[cfg(feature = "tag-9")]
+const TAG_INDEX: usize = 8;
+#[cfg(feature = "tag-10")]
+const TAG_INDEX: usize = 9;
+#[cfg(feature = "tag-11")]
+const TAG_INDEX: usize = 10;
+#[cfg(feature = "tag-12")]
+const TAG_INDEX: usize = 11;
+
+const TAG_ID: u16 = TAG_IDS[TAG_INDEX];
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("Launching anchor");
+    info!("Launching DWM3000 test tag {:04x}", TAG_ID);
 
-    let mut config = Config::default();
+    let mut config = StmConfig::default();
     {
         use embassy_stm32::rcc::*;
         config.rcc.hsi48 = Some(Hsi48Config {
             sync_from_usb: true,
-        }); // needed for USB
+        });
         config.rcc.sys = Sysclk::PLL1_R;
         config.rcc.hsi = true;
         config.rcc.pll = Some(Pll {
@@ -56,18 +73,17 @@ async fn main(spawner: Spawner) {
             mul: PllMul::MUL10,
             divp: None,
             divq: None,
-            divr: Some(PllRDiv::DIV8), // sysclk 80Mhz (16 / 1 * 10 / 2)
+            divr: Some(PllRDiv::DIV8),
         });
         config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
-        config.rcc.mux.adcsel = mux::Adcsel::SYS; // Enable ADC clock from system clock
+        config.rcc.mux.adcsel = mux::Adcsel::SYS;
     }
-    let p: embassy_stm32::Peripherals = embassy_stm32::init(config);
+    let p = embassy_stm32::init(config);
 
     let mut charger_enable = Output::new(p.PA10, Level::Low, Speed::Low);
     let mut charger_en1 = Output::new(p.PB0, Level::Low, Speed::Low);
     let mut charger_en2 = Output::new(p.PB1, Level::Low, Speed::Low);
 
-    // Bootstrap the STM6600 power management IC
     let power_int = ExtiInput::new(p.PB7, p.EXTI7, Pull::Up);
     let ps_hold = Output::new(p.PB5, Level::Low, Speed::Low);
     let mut bootstrap = STM6600BootstrapDevice::new(power_int, ps_hold);
@@ -76,29 +92,20 @@ async fn main(spawner: Spawner) {
         .await
         .expect("Can't initialize bootstrap");
 
-    // Initialize Battery Monitor
     let adc = Adc::new(p.ADC1);
     let battery_read_pin: Peri<PA3> = p.PA3;
-    // Initialize Indicator Led
-    let orange_pin = Output::new(p.PA8, Level::Low, Speed::Low);
+    let red_pin = Output::new(p.PA8, Level::Low, Speed::Low);
     let green_pin = Output::new(p.PA9, Level::Low, Speed::Low);
-
     spawner
-        .spawn(monitor_battery(
-            adc,
-            battery_read_pin,
-            orange_pin,
-            green_pin,
-        ))
+        .spawn(monitor_battery(adc, battery_read_pin, green_pin, red_pin))
         .expect("Failed to spawn battery monitor task");
 
+    // Preserve the original tag's USB100 charging mode.
     charger_enable.set_low();
-
-    // Set recharge current to 500mA
     charger_en1.set_low();
     charger_en2.set_low();
 
-    let spi: Spi<'_, embassy_stm32::mode::Async> = Spi::new(
+    let spi: Spi<'_, Async> = Spi::new(
         p.SPI1,
         p.PA5,
         p.PA7,
@@ -112,210 +119,223 @@ async fn main(spawner: Spawner) {
     let mut uwb_irq = ExtiInput::new(p.PA2, p.EXTI2, Pull::None);
     let mut uwb_reset = Flex::new(p.PA1);
 
-    let dw1000 = dw1000::DW1000::new(spi_device);
-
-    // spawner
-    //     .spawn(manage_button())
-    //     .expect("Failed to spawn button management task");
-
-    // spawner
-    //     .spawn(manage_uwb_antenna())
-    //     .expect("Failed to spawn UWB antenna management task");
-
-    info!("Anchor initialization complete");
-
-    // Initialize UWB module
     uwb_reset.set_as_output(Speed::Low);
     uwb_reset.set_low();
-    Timer::after(Duration::from_millis(100)).await;
-    uwb_reset.set_high();
+    Timer::after_millis(10).await;
     uwb_reset.set_as_input(Pull::None);
-    // Enable interrupts
-    let mut dw1000 = dw1000.init(&mut Delay).unwrap();
-    dw1000.enable_rx_interrupts().unwrap();
-    dw1000.enable_tx_interrupts().unwrap();
-    // Set antenna delays (hardcoded calibration values)
-    dw1000.set_antenna_delay(16456, 16300).unwrap();
-    // Set device address
-    dw1000
+    Timer::after_millis(5).await;
+
+    let phy = radio_config();
+    let radio = DW3000::new(spi_device)
+        .init()
+        .await
+        .expect("DWM3000 init failed")
+        .config(phy, Delay)
+        .await
+        .expect("DWM3000 configuration failed");
+    let mut radio = radio;
+    radio
         .set_address(
-            mac::PanId(0x0d57),         // hardcoded network id
-            mac::ShortAddress(3344u16), // random device address
+            Ieee802154Pan(PAN_ID),
+            Ieee802154Address::Short(TAG_ID.to_be_bytes()),
         )
-        .expect("Failed to set address");
-
-    let mut buf = [0; 128];
-
-    let mut frame_id = 0;
-    let mut ping_id = 0;
-    let mut last_ping_time = embassy_time::Instant::now();
-
-    // Create indicator LEDs (if you have them available - adjust based on your hardware)
-    // let mut led_d9 = Output::new(p.PX, Level::Low, Speed::Low);
-    // let mut led_d10 = Output::new(p.PX, Level::Low, Speed::Low);
-    // let mut led_d11 = Output::new(p.PX, Level::Low, Speed::Low);
-    // let mut led_d12 = Output::new(p.PX, Level::Low, Speed::Low);
+        .await
+        .expect("Unable to configure tag address");
+    radio
+        .set_antenna_delay(0, 0)
+        .await
+        .expect("Unable to configure antenna delay");
+    radio
+        .enable_rx_interrupts()
+        .await
+        .expect("Unable to enable RX IRQ");
+    radio
+        .enable_tx_interrupts()
+        .await
+        .expect("Unable to enable TX IRQ");
 
     loop {
-        info!("waiting for base station ping");
-
-        let mut receiving = dw1000
-            .receive(RxConfig::default())
-            .expect("Failed to receive message");
-
-        // Wait for receive interrupt with 500ms timeout
-        let result = with_timeout(Duration::from_millis(500), uwb_irq.wait_for_high()).await;
-
-        let message = match result {
-            Ok(_) => match receiving.wait_receive(&mut buf) {
-                Ok(msg) => msg,
-                Err(_) => {
-                    dw1000 = receiving
-                        .finish_receiving()
-                        .expect("Failed to finish receiving");
-                    continue;
-                }
-            },
-            Err(_) => {
-                info!("Timeout error occured");
-                dw1000 = receiving
-                    .finish_receiving()
-                    .expect("Failed to finish receiving");
-                continue;
-            }
+        let (next_radio, received) = receive_packet(
+            radio,
+            &mut uwb_irq,
+            phy,
+            Duration::from_micros(uwb::SUPERFRAME_US.into()),
+        )
+        .await;
+        radio = next_radio;
+        let Some((packet, poll_rx)) = received else {
+            continue;
         };
 
-        dw1000 = receiving
-            .finish_receiving()
-            .expect("Failed to finish receiving");
-
-        info!("msg from base station: received");
-
-        // Try to decode as Ping
-        let ping =
-            ranging::Ping::decode::<ExclusiveDevice<Spi<'_, Async>, Output<'_>, Delay>>(&message)
-                .expect("Failed to decode ping");
-
-        if let Some(ping) = ping {
-            // Received ping from an anchor. Reply with a ranging request.
-
-            // Indicate ping received (LED D10)
-            // led_d10.set_high();
-            Timer::after_millis(10).await;
-            // led_d10.set_low();
-
-            // Wait for a moment, to give the anchor a chance to start listening for the reply.
-            Timer::after_millis(10).await;
-
-            let mut sending = ranging::Request::new::<
-                ExclusiveDevice<
-                    embassy_stm32::spi::Spi<'_, embassy_stm32::mode::Async>,
-                    embassy_stm32::gpio::Output<'_>,
-                    Delay,
-                >,
-                embassy_stm32::gpio::Output<'_>,
-            >(&mut dw1000, &ping)
-            .expect("Failed to initiate request")
-            .send::<ExclusiveDevice<Spi<Async>, Output, Delay>, Output>(dw1000)
-            .expect("Failed to initiate request transmission");
-
-            // Wait for transmission complete interrupt with timeout
-            match with_timeout(Duration::from_millis(500), uwb_irq.wait_for_rising_edge()).await {
-                Ok(()) => {
-                    sending
-                        .wait_transmit()
-                        .expect("Failed to send ranging request");
-                }
-                Err(_) => {
-                    warn!("Timeout waiting for request transmit");
-                    dw1000 = sending.finish_sending().expect("Failed to finish sending");
-                    continue;
-                }
-            }
-
-            dw1000 = sending.finish_sending().expect("Failed to finish sending");
-
+        let Packet::Poll {
+            anchor_id,
+            tag_id,
+            sequence,
+            poll_tx: _,
+        } = packet
+        else {
+            continue;
+        };
+        if tag_id != TAG_ID {
             continue;
         }
 
-        // Try to decode as Response
-        let response = ranging::Response::decode::<
-            ExclusiveDevice<Spi<'_, Async>, Output<'_>, Delay>,
-        >(&message)
-        .expect("Failed to decode response");
-
-        if let Some(response) = response {
-            // Received ranging response from anchor. Now we can compute the distance.
-
-            // Indicate response received (LED D11)
-            // led_d11.set_high();
-            Timer::after_millis(10).await;
-            // led_d11.set_low();
-
-            // If this is not a PAN ID and short address, it doesn't come from a compatible node. Ignore it.
-            let (pan_id, addr) = match response.source {
-                Some(mac::Address::Short(pan_id, addr)) => (pan_id, addr),
-                _ => continue,
-            };
-
-            // Ranging response received. Compute distance.
-            let distance_mm = match ranging::compute_distance_mm(&response) {
-                Ok(distance) => distance,
-                Err(_) => {
-                    warn!("Failed to compute distance");
-                    continue;
-                }
-            };
-
-            // Indicate distance computed (LED D9)
-            // led_d9.set_high();
-            Timer::after_millis(10).await;
-            // led_d9.set_low();
-
-            info!("{:04x}:{:04x} - {} mm\n", pan_id.0, addr.0, distance_mm,);
-
+        let request_tx = delayed_after(poll_rx, uwb::REPLY_DELAY_US);
+        let mut buffer = [0; Packet::MAX_LEN];
+        let len = Packet::Request {
+            anchor_id,
+            tag_id: TAG_ID,
+            sequence,
+            poll_rx: poll_rx.value(),
+            request_tx: request_tx.value(),
+        }
+        .encode(&mut buffer);
+        let (next_radio, sent) = send_packet(
+            radio,
+            &mut uwb_irq,
+            &buffer[..len],
+            SendTime::Delayed(request_tx),
+            phy,
+            Duration::from_micros(RX_TIMEOUT_US.into()),
+        )
+        .await;
+        radio = next_radio;
+        if sent.is_none() {
+            warn!("Ranging request TX failed");
             continue;
         }
 
-        info!("Ignored message that was neither ping nor response\n");
+        let (next_radio, received) = receive_packet(
+            radio,
+            &mut uwb_irq,
+            phy,
+            Duration::from_micros(RX_TIMEOUT_US.into()),
+        )
+        .await;
+        radio = next_radio;
+        let Some((packet, response_rx)) = received else {
+            warn!("No ranging response from anchor {:04x}", anchor_id);
+            continue;
+        };
+
+        let Packet::Response {
+            anchor_id: response_anchor,
+            tag_id: response_tag,
+            sequence: response_sequence,
+            poll_tx: response_poll_tx,
+            request_rx,
+            response_tx,
+        } = packet
+        else {
+            continue;
+        };
+        if response_anchor != anchor_id || response_tag != TAG_ID || response_sequence != sequence {
+            continue;
+        }
+
+        match uwb::distance_mm(
+            response_poll_tx,
+            poll_rx.value(),
+            request_tx.value(),
+            request_rx,
+            response_tx,
+            response_rx.value(),
+        ) {
+            Some(distance) => info!("anchor {:04x}: {} mm", anchor_id, distance),
+            None => warn!("Invalid DS-TWR timestamps from anchor {:04x}", anchor_id),
+        }
     }
+}
+
+async fn send_packet<SPI>(
+    radio: DW3000<SPI, dw3000_ng::Ready>,
+    irq: &mut ExtiInput<'_>,
+    data: &[u8],
+    when: SendTime,
+    config: Config,
+    timeout: Duration,
+) -> (DW3000<SPI, dw3000_ng::Ready>, Option<Instant>)
+where
+    SPI: SpiDevice<u8>,
+{
+    let mut sending = radio
+        .send(data, when, config)
+        .await
+        .expect("DWM3000 send setup failed");
+    let timestamp = if with_timeout(timeout, irq.wait_for_rising_edge())
+        .await
+        .is_ok()
+    {
+        sending.s_wait().await.ok()
+    } else {
+        None
+    };
+    let radio = sending
+        .finish_sending()
+        .await
+        .expect("DWM3000 send recovery failed");
+    (radio, timestamp)
+}
+
+async fn receive_packet<SPI>(
+    radio: DW3000<SPI, dw3000_ng::Ready>,
+    irq: &mut ExtiInput<'_>,
+    config: Config,
+    timeout: Duration,
+) -> (DW3000<SPI, dw3000_ng::Ready>, Option<(Packet, Instant)>)
+where
+    SPI: SpiDevice<u8>,
+{
+    let mut receiving = radio
+        .receive(config)
+        .await
+        .expect("DWM3000 receive setup failed");
+    if with_timeout(timeout, irq.wait_for_rising_edge())
+        .await
+        .is_err()
+    {
+        let radio = receiving
+            .finish_receiving()
+            .await
+            .expect("DWM3000 receive recovery failed");
+        return (radio, None);
+    }
+    let mut buffer = [0; 127];
+    let received = receiving
+        .r_wait(&mut buffer)
+        .await
+        .ok()
+        .and_then(|message| {
+            Some((
+                Packet::decode(message.frame.payload()?).ok()?,
+                message.rx_time,
+            ))
+        });
+    let radio = receiving
+        .finish_receiving()
+        .await
+        .expect("DWM3000 receive recovery failed");
+    (radio, received)
 }
 
 #[embassy_executor::task]
 async fn monitor_battery(
     adc: Adc<'static, embassy_stm32::peripherals::ADC1>,
     peri: Peri<'static, PA3>,
-    orange_pin: Output<'static>,
     green_pin: Output<'static>,
+    red_pin: Output<'static>,
 ) {
     let mut battery_monitor = SingleCellLiIonBatteryMonitor::new(adc, peri);
-    let mut indicator_led = LtstIndicatorLed::new(orange_pin, green_pin);
+    let mut indicator_led = LtstIndicatorLed::new(green_pin, red_pin);
     loop {
         let percentage = battery_monitor
             .read_percentage()
             .await
             .expect("Can't read Percentage");
-
         info!("Battery Percentage: {}%", percentage);
         indicator_led
             .show_battery_percentage(percentage)
             .expect("Can't set LED state");
-        Timer::after(Duration::from_secs(1)).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn manage_button() {
-    // Placeholder for button management logic
-    loop {
-        Timer::after(Duration::from_secs(10)).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn manage_uwb_antenna() {
-    loop {
-        // Placeholder for UWB antenna management logic
-        Timer::after(Duration::from_secs(10)).await;
+        Timer::after_secs(1).await;
     }
 }

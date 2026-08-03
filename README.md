@@ -1,65 +1,53 @@
-# `stm32-template`
+# Firmware DWM3000 per ancore e tag
 
-> A template for building applications for STM32 microcontrollers
+Questo workspace contiene il firmware STM32L432 per le ancore e un tag
+temporaneo, entrambi con modulo Qorvo DWM3000 e driver
+[`dw3000-ng`](https://crates.io/crates/dw3000-ng).
 
-## Dependencies
+## Ranging e capacità
 
-To build embedded programs using this template you'll need:
+Il sistema usa asymmetric double-sided two-way ranging (DS-TWR):
 
-- The `cargo generate` subcommand. [Installation
-  instructions](https://github.com/cargo-generate/cargo-generate#installation).
-``` console
-$ cargo install cargo-generate
+1. L'ancora invia un `Poll` nello slot assegnato al tag.
+2. Il tag risponde con `Request` a trasmissione ritardata.
+3. L'ancora invia `Response` con i timestamp hardware necessari; il tag
+   calcola e registra la distanza in millimetri.
+
+L'ancora `A001` è il master TDMA e sincronizza le altre ancore via UWB a ogni
+superframe. Sono configurati staticamente cinque ID di ancora (`A001`–`A005`)
+e dodici ID di tag (`B001`–`B00C`). La configurazione usa canale 5, 6.8 Mbps,
+PRF 64 MHz e preambolo da 64 simboli.
+
+Con cinque ancore e dodici tag il superframe è 130 ms, cioè circa **7.7 Hz per
+tag**. È la scelta affidabile con DS-TWR e slot da 2 ms; 12 robot a 20 Hz
+richiederebbero 60 ranging completi ogni 50 ms e non lascerebbero margine per
+ritardi SPI, retry o propagazione multipath. Per quattro ancore il timing può
+essere ridotto dopo validazione hardware.
+
+## Build e identificativi
+
+L'ID è selezionato in compilazione. L'ancora `anchor-1` è sempre il master:
+
+```console
+cargo build --release -p uwb-anchor --no-default-features --features anchor-1
+cargo build --release -p uwb-anchor --no-default-features --features anchor-2
+cargo build --release -p uwb-tag --no-default-features --features tag-1
 ```
 
-- Flash and run/debug tools:
-``` console
-$ cargo install probe-rs --features cli
-```
+Le feature disponibili sono `anchor-1` … `anchor-5` e `tag-1` … `tag-12`.
+Le tabelle ID e i parametri TDMA sono in `src/uwb.rs`.
 
-- `rust-std` components (pre-compiled `core` crate) for the ARM Cortex-M
-  targets. Run:
-  
-``` console
-$ rustup target add thumbv6m-none-eabi thumbv7m-none-eabi thumbv7em-none-eabi thumbv7em-none-eabihf
-```
+## Messa in servizio
 
-## Instantiate the template.
+Il reset del DWM3000 viene pilotato open-drain: PA1 è trascinato low e poi
+rilasciato in input. Non deve essere forzato high.
 
-1. Run and enter project name
-``` console
-$ cargo generate --git https://github.com/burrbull/stm32-template/
- Project Name: app
-```
+I ritardi antenna sono impostati provvisoriamente a zero per rendere esplicita
+la necessità di calibrazione per ogni coppia di layout/modulo. Prima di usare
+le misure per trilaterazione occorre calibrare TX/RX antenna delay e inserire
+i valori nella fase di inizializzazione di ancora e tag. Le coordinate delle
+ancore restano nel firmware del robot, che associa le distanze agli ID statici
+e svolge la trilaterazione.
 
-2. Specify **chip product name** and answer on several other guide questions.
-
-3. Your program is ready to compile:
-``` console
-$ cargo build --release
-```
-
-## Flash and run/debug
-
-You can flash your firmware using one of those tools:
-
-- `cargo flash --release` — just flash
-- `cargo run --release` — flash and run using `probe-rs run` runner or `probe-run` runner (deprecated) which you can set in `.cargo/config.toml`
-- `cargo embed --release` — multifunctional tool for flash and debug
-
-You also can debug your firmware on device from VS Code with [probe-rs](https://probe.rs/docs/tools/vscode/) extention or with `probe-rs gdb` command.
-You will need SVD specification for your chip for this. You can load patched SVD files [here](https://stm32-rs.github.io/stm32-rs/).
-
-## Contribution
-
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
-dual licensed as above, without any additional terms or conditions.
-
-## Code of Conduct
-
-Contribution to this crate is organized under the terms of the [Rust Code of
-Conduct][CoC], the maintainer of this crate, promises
-to intervene to uphold that code of conduct.
-
-[CoC]: https://www.rust-lang.org/policies/code-of-conduct
+La gestione esistente di bootstrap STM6600, monitor batteria, LED e BQ24074 è
+preservata. Il mapping dei LED è stato corretto: PA8 è rosso e PA9 è verde.
