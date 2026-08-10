@@ -9,12 +9,14 @@
 #![no_main]
 #![no_std]
 
-use defmt::{info, warn};
+use defmt::{debug, info, warn};
 use dw3000_ng::{hl::SendTime, time::Instant, Config, DW3000};
 use embassy_executor::Spawner;
 use embassy_stm32::exti::ExtiInput;
 use embassy_stm32::gpio::{Level, Output, Pull, Speed};
 use embassy_stm32::peripherals::PA3;
+use embassy_stm32::spi::Config as SpiConfig;
+use embassy_stm32::time::Hertz;
 use embassy_stm32::{adc::Adc, gpio::Flex, mode::Async, spi::Spi, Config as StmConfig, Peri};
 use embassy_time::{with_timeout, Delay, Duration, Timer};
 use embedded_hal_async::spi::SpiDevice;
@@ -73,7 +75,13 @@ async fn main(spawner: Spawner) {
             mul: PllMul::MUL10,
             divp: None,
             divq: None,
-            divr: Some(PllRDiv::DIV8),
+            // 160 MHz VCO / 2 = 80 MHz, the STM32L432's maximum. The ranging
+            // rate is limited by how fast a reply can be programmed after a
+            // frame arrives, and most of that turnaround is MCU-side work
+            // (DMA setup, the driver's busy-wait loops) rather than SPI bits,
+            // so the core clock matters as much as the SPI clock. It also
+            // lifts PCLK2 to 80 MHz, which is what allows the faster SPI below.
+            divr: Some(PllRDiv::DIV2),
         });
         config.rcc.mux.clk48sel = mux::Clk48sel::HSI48;
         config.rcc.mux.adcsel = mux::Adcsel::SYS;
@@ -85,7 +93,10 @@ async fn main(spawner: Spawner) {
     let mut charger_en2 = Output::new(p.PB1, Level::Low, Speed::Low);
 
     let power_int = ExtiInput::new(p.PB7, p.EXTI7, Pull::Up);
-    let ps_hold = Output::new(p.PB5, Level::Low, Speed::Low);
+    // Assert PS_HOLD immediately: on a debugger-triggered boot (no fresh
+    // button press) the power_int edge below may never come, and the
+    // STM6600 cuts power if it sees PS_HOLD low for too long.
+    let ps_hold = Output::new(p.PB5, Level::High, Speed::Low);
     let mut bootstrap = STM6600BootstrapDevice::new(power_int, ps_hold);
     bootstrap
         .initialize()
@@ -105,6 +116,12 @@ async fn main(spawner: Spawner) {
     charger_en1.set_low();
     charger_en2.set_low();
 
+    // embassy defaults to 1 MHz, which makes the driver's 129-byte frame-buffer
+    // transfers slow enough to blow every DS-TWR reply deadline. The DW3000
+    // only requires SPI below 7 MHz while it is in INIT_RC, so start at 5 MHz
+    // and raise it once the clock PLL is locked (see below).
+    let mut spi_config = SpiConfig::default();
+    spi_config.frequency = Hertz(5_000_000);
     let spi: Spi<'_, Async> = Spi::new(
         p.SPI1,
         p.PA5,
@@ -112,7 +129,7 @@ async fn main(spawner: Spawner) {
         p.PA6,
         p.DMA1_CH3,
         p.DMA1_CH2,
-        Default::default(),
+        spi_config,
     );
     let cs = Output::new(p.PA4, Level::High, Speed::High);
     let spi_device = ExclusiveDevice::new(spi, cs, Delay).expect("Unable to get SPI device");
@@ -134,6 +151,18 @@ async fn main(spawner: Spawner) {
         .await
         .expect("DWM3000 configuration failed");
     let mut radio = radio;
+
+    // init() and config() have now locked the clock PLL, so the INIT_RC limit
+    // no longer applies and the DW3000 accepts up to 38 MHz. Everything on the
+    // ranging critical path is register and frame-buffer traffic, so this is
+    // the single biggest lever on the achievable update rate.
+    {
+        let bus = radio.ll().spi.bus_mut();
+        let mut fast = bus.get_current_config();
+        fast.frequency = Hertz(20_000_000);
+        bus.set_config(&fast).expect("Unable to raise SPI frequency");
+    }
+
     radio
         .set_address(
             Ieee802154Pan(PAN_ID),
@@ -142,7 +171,8 @@ async fn main(spawner: Spawner) {
         .await
         .expect("Unable to configure tag address");
     radio
-        .set_antenna_delay(0, 0)
+        // Note the driver takes (rx, tx), not (tx, rx).
+        .set_antenna_delay(uwb::RX_ANTENNA_DELAY, uwb::TX_ANTENNA_DELAY)
         .await
         .expect("Unable to configure antenna delay");
     radio
@@ -164,8 +194,17 @@ async fn main(spawner: Spawner) {
         .await;
         radio = next_radio;
         let Some((packet, poll_rx)) = received else {
+            debug!("No frame received this superframe");
             continue;
         };
+        match packet {
+            Packet::Sync { sequence } => debug!("RX Sync seq={}", sequence),
+            Packet::Poll {
+                anchor_id, tag_id, ..
+            } => debug!("RX Poll anchor={:04x} tag={:04x}", anchor_id, tag_id),
+            Packet::Request { anchor_id, .. } => debug!("RX Request anchor={:04x}", anchor_id),
+            Packet::Response { anchor_id, .. } => debug!("RX Response anchor={:04x}", anchor_id),
+        }
 
         let Packet::Poll {
             anchor_id,
@@ -180,6 +219,16 @@ async fn main(spawner: Spawner) {
             continue;
         }
 
+        // The reply deadline is measured from the hardware receive timestamp, so
+        // report how much of REPLY_DELAY_US the turnaround actually consumes.
+        if let Some(elapsed) = uwb::elapsed_since_us(&mut radio, poll_rx).await {
+            debug!(
+                "reply setup: {} us of {} us budget",
+                elapsed,
+                uwb::REPLY_DELAY_US
+            );
+        }
+
         let request_tx = delayed_after(poll_rx, uwb::REPLY_DELAY_US);
         let mut buffer = [0; Packet::MAX_LEN];
         let len = Packet::Request {
@@ -187,7 +236,9 @@ async fn main(spawner: Spawner) {
             tag_id: TAG_ID,
             sequence,
             poll_rx: poll_rx.value(),
-            request_tx: request_tx.value(),
+            // The frame cannot carry a timestamp read after its own
+            // transmission, so predict what the radio will report.
+            request_tx: uwb::delayed_tx_timestamp(request_tx),
         }
         .encode(&mut buffer);
         let (next_radio, sent) = send_packet(
@@ -200,10 +251,12 @@ async fn main(spawner: Spawner) {
         )
         .await;
         radio = next_radio;
-        if sent.is_none() {
+        // Range against the timestamp the radio actually reported rather than
+        // the instant we programmed; the two differ by the TX antenna delay.
+        let Some(actual_request_tx) = sent else {
             warn!("Ranging request TX failed");
             continue;
-        }
+        };
 
         let (next_radio, received) = receive_packet(
             radio,
@@ -236,7 +289,7 @@ async fn main(spawner: Spawner) {
         match uwb::distance_mm(
             response_poll_tx,
             poll_rx.value(),
-            request_tx.value(),
+            actual_request_tx.value(),
             request_rx,
             response_tx,
             response_rx.value(),
@@ -266,8 +319,17 @@ where
         .await
         .is_ok()
     {
-        sending.s_wait().await.ok()
+        match sending.s_wait().await {
+            Ok(instant) => Some(instant),
+            Err(_) => {
+                warn!("TX rejected by radio after IRQ");
+                None
+            }
+        }
     } else {
+        // A delayed send whose instant has already passed never transmits, so
+        // this is the symptom of a missed deadline as well as of a dead IRQ.
+        debug!("TX IRQ timeout (missed delayed-send deadline?)");
         None
     };
     let radio = sending
@@ -278,7 +340,7 @@ where
 }
 
 async fn receive_packet<SPI>(
-    radio: DW3000<SPI, dw3000_ng::Ready>,
+    mut radio: DW3000<SPI, dw3000_ng::Ready>,
     irq: &mut ExtiInput<'_>,
     config: Config,
     timeout: Duration,
@@ -286,6 +348,12 @@ async fn receive_packet<SPI>(
 where
     SPI: SpiDevice<u8>,
 {
+    // Release the IRQ line before arming the receiver, or a flag left over from
+    // an earlier failed receive would mean no rising edge ever arrives.
+    if let Some(error) = uwb::take_rx_error(&mut radio).await {
+        debug!("Cleared stale RX flag before receive: {}", error);
+    }
+
     let mut receiving = radio
         .receive(config)
         .await
@@ -294,10 +362,13 @@ where
         .await
         .is_err()
     {
-        let radio = receiving
+        let mut radio = receiving
             .finish_receiving()
             .await
             .expect("DWM3000 receive recovery failed");
+        if let Some(error) = uwb::take_rx_error(&mut radio).await {
+            debug!("RX aborted: {}", error);
+        }
         return (radio, None);
     }
     let mut buffer = [0; 127];
@@ -306,15 +377,28 @@ where
         .await
         .ok()
         .and_then(|message| {
-            Some((
-                Packet::decode(message.frame.payload()?).ok()?,
-                message.rx_time,
-            ))
+            let payload = message.frame.payload()?;
+            // Distinguish "nothing on air" from "frame arrived but rejected":
+            // folding both into None made a decode bug look like radio silence.
+            match Packet::decode(payload) {
+                Ok(packet) => Some((packet, message.rx_time)),
+                Err(_) => {
+                    debug!("Undecodable payload ({} bytes)", payload.len());
+                    None
+                }
+            }
         });
-    let radio = receiving
+    let mut radio = receiving
         .finish_receiving()
         .await
         .expect("DWM3000 receive recovery failed");
+    // Always clear: r_wait only resets the flags when it succeeds, and a
+    // leftover flag would also block the *next* transmission's IRQ wait.
+    if let Some(error) = uwb::take_rx_error(&mut radio).await {
+        if received.is_none() {
+            debug!("RX failed: {}", error);
+        }
+    }
     (radio, received)
 }
 
@@ -332,7 +416,7 @@ async fn monitor_battery(
             .read_percentage()
             .await
             .expect("Can't read Percentage");
-        info!("Battery Percentage: {}%", percentage);
+        debug!("Battery Percentage: {}%", percentage);
         indicator_led
             .show_battery_percentage(percentage)
             .expect("Can't set LED state");

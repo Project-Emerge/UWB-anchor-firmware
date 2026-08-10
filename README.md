@@ -14,15 +14,22 @@ Il sistema usa asymmetric double-sided two-way ranging (DS-TWR):
    calcola e registra la distanza in millimetri.
 
 L'ancora `A001` è il master TDMA e sincronizza le altre ancore via UWB a ogni
-superframe. Sono configurati staticamente cinque ID di ancora (`A001`–`A005`)
+superframe. Sono configurati staticamente quattro ID di ancora (`A001`–`A004`)
 e dodici ID di tag (`B001`–`B00C`). La configurazione usa canale 5, 6.8 Mbps,
 PRF 64 MHz e preambolo da 64 simboli.
 
-Con cinque ancore e dodici tag il superframe è 130 ms, cioè circa **7.7 Hz per
-tag**. È la scelta affidabile con DS-TWR e slot da 2 ms; 12 robot a 20 Hz
-richiederebbero 60 ranging completi ogni 50 ms e non lascerebbero margine per
-ritardi SPI, retry o propagazione multipath. Per quattro ancore il timing può
-essere ridotto dopo validazione hardware.
+Il superframe contiene uno slot DS-TWR per ogni combinazione ancora/tag, quindi
+il rate di aggiornamento è determinato **dalle dimensioni delle tabelle** prima
+ancora che dai tempi: ogni nodo previsto ma non installato costa comunque uno
+slot pieno. Con quattro ancore e dodici tag sono 48 slot da 5.5 ms, cioè 274 ms
+di superframe → circa **3.6 Hz per tag**.
+
+Il limite non è il tempo di volo ma il turnaround SPI/MCU tra la ricezione di un
+frame e la programmazione della risposta. Per questo il core gira a 80 MHz e
+l'SPI passa a 20 MHz subito dopo l'init del DW3000 (il vincolo <7 MHz vale solo
+in INIT_RC). Per salire ancora, la leva più efficace è ridurre `TAG_IDS` al
+numero di robot realmente in campo: a parità di tempi, 6 tag danno ~7 Hz e 4 tag
+~10 Hz. La tabella completa è nel commento di `SUPERFRAME_US` in `src/uwb.rs`.
 
 ## Build e identificativi
 
@@ -34,7 +41,7 @@ cargo build --release -p uwb-anchor --no-default-features --features anchor-2
 cargo build --release -p uwb-tag --no-default-features --features tag-1
 ```
 
-Le feature disponibili sono `anchor-1` … `anchor-5` e `tag-1` … `tag-12`.
+Le feature disponibili sono `anchor-1` … `anchor-4` e `tag-1` … `tag-12`.
 Le tabelle ID e i parametri TDMA sono in `src/uwb.rs`.
 
 ## Messa in servizio
@@ -42,12 +49,18 @@ Le tabelle ID e i parametri TDMA sono in `src/uwb.rs`.
 Il reset del DWM3000 viene pilotato open-drain: PA1 è trascinato low e poi
 rilasciato in input. Non deve essere forzato high.
 
-I ritardi antenna sono impostati provvisoriamente a zero per rendere esplicita
-la necessità di calibrazione per ogni coppia di layout/modulo. Prima di usare
-le misure per trilaterazione occorre calibrare TX/RX antenna delay e inserire
-i valori nella fase di inizializzazione di ancora e tag. Le coordinate delle
-ancore restano nel firmware del robot, che associa le distanze agli ID statici
-e svolge la trilaterazione.
+I ritardi antenna (`TX_ANTENNA_DELAY` / `RX_ANTENNA_DELAY` in `src/uwb.rs`) sono
+impostati a 16385 tick, il valore nominale degli esempi Qorvo DW3000 per la
+configurazione a 64 MHz PRF usata qui. Non è un valore calibrato: il ritardo
+reale dipende da modulo e layout, quindi resta un bias costante che può valere
+alcune decine di centimetri. Per calibrare, misurare una distanza nota e
+correggere il valore: un tick vale circa 4,69 mm e, poiché il ritardo si applica
+a entrambi i capi del collegamento, variare di N tick sposta la distanza
+riportata di circa 2 * N tick. Entrambi i nodi devono usare gli stessi valori,
+per questo sono condivisi nella libreria invece di essere duplicati.
+
+Le coordinate delle ancore restano nel firmware del robot, che associa le
+distanze agli ID statici e svolge la trilaterazione.
 
 La gestione esistente di bootstrap STM6600, monitor batteria, LED e BQ24074 è
 preservata. Il mapping dei LED è stato corretto: PA8 è rosso e PA9 è verde.

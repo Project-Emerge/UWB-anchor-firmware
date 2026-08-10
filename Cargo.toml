@@ -78,7 +78,6 @@ anchor-1 = []
 anchor-2 = []
 anchor-3 = []
 anchor-4 = []
-anchor-5 = []
 
 [workspace.dependencies.reqwest]
 version = "0.11"
