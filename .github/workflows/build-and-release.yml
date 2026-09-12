@@ -69,7 +69,7 @@ jobs:
       - *install-arm-toolchain
       - *cache
       - name: Run release-plz
-        uses: release-plz/action@487eb7b5c085a664d5c5ca05f4159bd9b591182a # v0.5.120
+        uses: release-plz/action@a80d79efe0a195618acb02a4089d55fe74d2505f # v0.5.136
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
