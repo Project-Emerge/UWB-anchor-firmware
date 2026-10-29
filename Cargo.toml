@@ -68,7 +68,7 @@ name = "uwb_anchor"
 path = "src/lib.rs"
 
 [workspace.dependencies.reqwest]
-version = "0.11"
+version = "0.13"
 features = ["blocking"]
 
 # Set the default for dependencies.
